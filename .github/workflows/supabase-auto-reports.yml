@@ -44,7 +44,7 @@ jobs:
             echo "✅ Supabase credentials found"
           fi
 
-      - name: List available tables
+      - name: Discover available tables
         run: |
           python -c '
           import os
@@ -62,20 +62,36 @@ jobs:
           
           # Try to get schema information
           try:
+              print("🔍 Attempting to discover available tables...")
+              
+              # Try to list tables using the system catalog
               response = requests.get(
                   f"{supabase_url}/rest/v1/",
                   headers=headers
               )
               
-              print(f"Status code: {response.status_code}")
-              print(f"Response: {response.text}")
-              
+              print(f"API root response: {response.status_code}")
               if response.status_code == 200:
-                  print("✅ Successfully connected to Supabase API")
-              else:
-                  print(f"❌ Error connecting to Supabase API: {response.status_code}")
+                  print(f"Available endpoints: {response.text}")
+              
+              # Try a few common table names to see if any exist
+              test_tables = ["companies", "users", "projects", "time_entries", 
+                            "company", "user", "project", "timeentry",
+                            "Companies", "Users", "Projects", "TimeEntries"]
+              
+              for table in test_tables:
+                  test_response = requests.get(
+                      f"{supabase_url}/rest/v1/{table}?limit=1",
+                      headers=headers
+                  )
+                  
+                  if test_response.status_code == 200:
+                      print(f"✅ Found table: {table}")
+                  else:
+                      print(f"❌ Table not found: {table} (Status: {test_response.status_code})")
+          
           except Exception as e:
-              print(f"❌ Error: {str(e)}")
+              print(f"❌ Error during table discovery: {str(e)}")
           '
 
       - name: Export data from Supabase
@@ -137,67 +153,53 @@ jobs:
           thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
           current_date = datetime.now().strftime("%Y-%m-%d")
           
-          # Define tables with lowercase names (PostgreSQL often uses lowercase)
-          tables = {
-              "companies": "company",
-              "projects": "project",
-              "users": "user",
-              "activity_types": "activitytype",
-              "focus_areas": "focusarea",
-              "time_entries": "timeentry",
-              "submissions": "submission"
+          # Try different table name variations
+          table_variations = {
+              "companies": ["companies", "company", "Companies", "Company"],
+              "projects": ["projects", "project", "Projects", "Project"],
+              "users": ["users", "user", "Users", "User"],
+              "activity_types": ["activity_types", "activitytype", "activitytypes", "ActivityType", "ActivityTypes"],
+              "focus_areas": ["focus_areas", "focusarea", "focusareas", "FocusArea", "FocusAreas"],
+              "time_entries": ["time_entries", "timeentry", "timeentries", "TimeEntry", "TimeEntries"],
+              "submissions": ["submissions", "submission", "Submissions", "Submission"]
           }
           
           # Export data for each table
           results = {}
           
-          # Export active companies
-          companies = fetch_data(tables["companies"], {"deletedAt": "is.null"})
-          results["companies"] = len(companies) if not companies.empty else 0
-          if not companies.empty:
-              companies.to_csv("exports/companies.csv", index=False)
+          # Try to find and export each table
+          for display_name, variations in table_variations.items():
+              found = False
               
-          # Export active projects
-          projects = fetch_data(tables["projects"], {"deletedAt": "is.null"})
-          results["projects"] = len(projects) if not projects.empty else 0
-          if not projects.empty:
-              projects.to_csv("exports/projects.csv", index=False)
+              for table_name in variations:
+                  # Try without deletedAt filter first to see if table exists
+                  test_df = fetch_data(table_name, {"limit": 1})
+                  
+                  if not test_df.empty:
+                      print(f"✅ Found table: {table_name}")
+                      found = True
+                      
+                      # Now fetch with proper filters
+                      if display_name == "time_entries":
+                          df = fetch_data(table_name, {"deletedAt": "is.null", "entryDate": f"gte.{thirty_days_ago}"})
+                      else:
+                          df = fetch_data(table_name, {"deletedAt": "is.null"})
+                      
+                      results[display_name] = len(df) if not df.empty else 0
+                      
+                      if not df.empty:
+                          # Remove sensitive fields for users
+                          if display_name == "users" and "password" in df.columns:
+                              df = df.drop(columns=["password"])
+                          
+                          df.to_csv(f"exports/{display_name}.csv", index=False)
+                      
+                      break
               
-          # Export active users
-          users = fetch_data(tables["users"], {"deletedAt": "is.null"})
-          results["users"] = len(users) if not users.empty else 0
-          if not users.empty:
-              # Remove sensitive fields
-              if "password" in users.columns:
-                  users = users.drop(columns=["password"])
-              users.to_csv("exports/users.csv", index=False)
-              
-          # Export activity types
-          activity_types = fetch_data(tables["activity_types"], {"deletedAt": "is.null"})
-          results["activity_types"] = len(activity_types) if not activity_types.empty else 0
-          if not activity_types.empty:
-              activity_types.to_csv("exports/activity_types.csv", index=False)
-              
-          # Export focus areas
-          focus_areas = fetch_data(tables["focus_areas"], {"deletedAt": "is.null"})
-          results["focus_areas"] = len(focus_areas) if not focus_areas.empty else 0
-          if not focus_areas.empty:
-              focus_areas.to_csv("exports/focus_areas.csv", index=False)
-              
-          # Export time entries from last 30 days
-          time_entries = fetch_data(tables["time_entries"], 
-                                   {"deletedAt": "is.null", 
-                                    "entryDate": f"gte.{thirty_days_ago}"})
-          results["time_entries"] = len(time_entries) if not time_entries.empty else 0
-          if not time_entries.empty:
-              time_entries.to_csv("exports/time_entries.csv", index=False)
-              
-          # Export submissions
-          submissions = fetch_data(tables["submissions"], {"deletedAt": "is.null"})
-          results["submissions"] = len(submissions) if not submissions.empty else 0
-          if not submissions.empty:
-              submissions.to_csv("exports/submissions.csv", index=False)
-              
+              if not found:
+                  print(f"❌ Could not find any variation of {display_name}")
+                  results[display_name] = 0
+          
           # Create a summary file with export information
           with open("exports/export_summary.json", "w") as f:
               summary = {
@@ -285,6 +287,21 @@ jobs:
           if successful_exports == 0:
               print("⚠️ Warning: No data was successfully exported from any table")
               print("Please check your Supabase configuration and table access permissions")
+              
+              # Create a placeholder file to indicate we tried
+              with open("exports/README.md", "w") as f:
+                  f.write(f"""# Supabase Export Attempt
+
+No data could be exported on {timestamp}.
+
+Possible reasons:
+1. Table names might be different from what we tried
+2. API key might not have sufficient permissions
+3. Row Level Security (RLS) policies might be restricting access
+4. Tables might be in a different schema than "public"
+
+Please check your Supabase configuration and try again.
+""")
           else:
               print(f"✅ Successfully exported data from {successful_exports} tables")
           '
@@ -302,7 +319,6 @@ jobs:
           fi
 
       - name: Upload CSV artifacts
-        if: steps.check_exports.outputs.export_exists == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: supabase-data-exports-${{ github.run_number }}
@@ -310,7 +326,6 @@ jobs:
           retention-days: 30
 
       - name: Deploy to GitHub Pages
-        if: steps.check_exports.outputs.export_exists == 'true'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
