@@ -6,7 +6,8 @@ on:
   workflow_dispatch: # Allow manual trigger
   push:
     branches:
-      master
+      - master
+      - main  # Added main branch support
 
 permissions:
   contents: write
@@ -37,7 +38,14 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev
+          sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev libfontconfig1-dev
+
+      - name: Cache R packages
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: ${{ runner.os }}-r-${{ hashFiles('**/renv.lock') }}
+          restore-keys: ${{ runner.os }}-r-
 
       - name: Install R dependencies
         run: |
@@ -45,54 +53,91 @@ jobs:
           R -e 'install.packages(c("rmarkdown", "knitr"), dependencies=TRUE)'
           R -e 'install.packages(c("httr", "jsonlite", "dplyr", "ggplot2", "lubridate"), dependencies=TRUE)'
           R -e 'install.packages(c("tinytex", "DBI", "RPostgres"), dependencies=TRUE)'
-          R -e 'tinytex::install_tinytex()'
+          R -e 'install.packages(c("scales", "forcats"), dependencies=TRUE)'
+          R -e 'tinytex::install_tinytex(force = TRUE)'
 
       - name: Check Supabase credentials
         run: |
           if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
-            echo "Supabase credentials are not properly set in GitHub secrets."
+            echo "❌ Supabase credentials are not properly set in GitHub secrets."
             exit 1
+          else
+            echo "✅ Supabase credentials found"
           fi
 
       - name: Verify R package installation
         run: |
-          R -e 'installed_packages <- installed.packages()[,"Package"]; cat("Installed packages:", paste(installed_packages, collapse=", "), "\n")'
-          R -e 'if(!"httr" %in% installed.packages()[,"Package"]) { install.packages("httr", dependencies=TRUE); print("Reinstalled httr") }'
-          R -e 'library(httr); print("httr loaded successfully")'
+          R -e 'cat("📦 Checking required packages...\n")'
+          R -e 'required_packages <- c("httr", "jsonlite", "dplyr", "ggplot2", "lubridate", "rmarkdown", "knitr")'
+          R -e 'missing_packages <- required_packages[!required_packages %in% installed.packages()[,"Package"]]'
+          R -e 'if(length(missing_packages) > 0) { cat("❌ Missing packages:", paste(missing_packages, collapse=", "), "\n"); install.packages(missing_packages, dependencies=TRUE) } else { cat("✅ All required packages installed\n") }'
+
+      - name: Test Supabase connection
+        run: |
+          R -e '
+          library(httr)
+          library(jsonlite)
+          
+          # Test connection to Supabase
+          response <- GET(
+            url = paste0(Sys.getenv("SUPABASE_URL"), "/rest/v1/"),
+            add_headers(
+              "apikey" = Sys.getenv("SUPABASE_KEY"),
+              "Authorization" = paste("Bearer", Sys.getenv("SUPABASE_KEY"))
+            )
+          )
+          
+          if (http_status(response)$category == "Success") {
+            cat("✅ Supabase connection successful\n")
+          } else {
+            cat("❌ Supabase connection failed:", http_status(response)$message, "\n")
+            stop("Supabase connection test failed")
+          }
+          '
 
       - name: Render RMarkdown
-        run : |
-          Rscript -e 'rmarkdown::render("auto-report.Rmd", output_file = "report.pdf")'
+        run: |
+          echo "🔄 Starting report generation..."
+          Rscript -e 'rmarkdown::render("auto-report.Rmd", output_file = "timesheets-report.pdf")'
+          echo "✅ Report generation completed"
 
       - name: Check Query Status
         id: query_check
         run: |
           if [ -f query_status.txt ] && [ "$(cat query_status.txt)" == "SUCCESS" ]; then
-            echo "Query executed successfully, proceeding with deployment."
+            echo "✅ Query executed successfully, proceeding with deployment."
             echo "query_status=success" >> $GITHUB_OUTPUT
           else
-            echo "Query failed, aborting deployment."
+            echo "❌ Query failed, aborting deployment."
             if [ -f error_log.txt ]; then
-              echo "Error details:"
+              echo "📋 Error details:"
               cat error_log.txt
             fi
             echo "query_status=failed" >> $GITHUB_OUTPUT
             exit 1
           fi
 
-      - name: Deploy PDF
+      - name: Upload PDF Artifact
         if: steps.query_check.outputs.query_status == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: supabase-report-pdf
-          path: report.pdf
+          name: timesheets-report-pdf-${{ github.run_number }}
+          path: timesheets-report.pdf
+          retention-days: 30
 
-      # Github Pagea
-      - name: Deploy to Github Pages
+      - name: Create deployment directory
+        if: steps.query_check.outputs.query_status == 'success'
+        run: |
+          mkdir -p deploy
+          cp timesheets-report.pdf deploy/
+          echo "<html><body><h1>Timesheets Report</h1><p><a href='timesheets-report.pdf'>Download Latest Report (PDF)</a></p><p>Generated: $(date)</p></body></html>" > deploy/index.html
+
+      - name: Deploy to GitHub Pages
         if: steps.query_check.outputs.query_status == 'success'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: .
+          publish_dir: deploy
           publish_branch: gh-pages
-          keep_files: true
+          keep_files: false
+          commit_message: "📊 Update timesheets report - ${{ github.run_number }}"
