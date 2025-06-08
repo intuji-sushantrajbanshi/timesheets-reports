@@ -101,66 +101,129 @@ jobs:
           thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
           current_date = datetime.now().strftime("%Y-%m-%d")
           
-          # Table names - adjust these to match your actual Supabase table names
-          tables = {
-              "companies": "Company",
-              "projects": "Project",
-              "users": "User",
-              "activity_types": "ActivityType",
-              "focus_areas": "FocusArea",
-              "time_entries": "TimeEntry",
-              "submissions": "Submission"
+          # Function to get all available tables
+          def get_available_tables():
+              """Get list of all available tables from Supabase"""
+              try:
+                  # Try to get schema information
+                  response = requests.get(f"{supabase_url}/rest/v1/", headers=headers)
+                  if response.status_code == 200:
+                      # Parse the OpenAPI spec to get table names
+                      openapi_data = response.json()
+                      if "paths" in openapi_data:
+                          tables = []
+                          for path in openapi_data["paths"].keys():
+                              if path.startswith("/") and not path.startswith("/rpc/"):
+                                  table_name = path.strip("/")
+                                  if table_name and "." not in table_name:
+                                      tables.append(table_name)
+                          return tables
+              except Exception as e:
+                  print(f"Could not fetch table list: {e}")
+              
+              # Fallback: common lowercase table names
+              return ["companies", "projects", "users", "activity_types", "focus_areas", "time_entries", "submissions"]
+          
+          # Get available tables
+          available_tables = get_available_tables()
+          print(f"🔍 Available tables: {available_tables}")
+          
+          # Map common table names to what might exist in your database
+          table_mapping = {
+              "companies": ["companies", "company", "Company"],
+              "projects": ["projects", "project", "Project"], 
+              "users": ["users", "user", "User", "profiles", "profile"],
+              "activity_types": ["activity_types", "activitytypes", "ActivityType", "activity_type"],
+              "focus_areas": ["focus_areas", "focusareas", "FocusArea", "focus_area"],
+              "time_entries": ["time_entries", "timeentries", "TimeEntry", "time_entry"],
+              "submissions": ["submissions", "submission", "Submission"]
           }
           
-          # Export data for each table
+          # Find actual table names
+          tables = {}
+          for logical_name, possible_names in table_mapping.items():
+              for possible_name in possible_names:
+                  if possible_name in available_tables:
+                      tables[logical_name] = possible_name
+                      print(f"✅ Found table: {logical_name} -> {possible_name}")
+                      break
+              else:
+                  print(f"❌ No table found for: {logical_name}")
+          
+          print(f"📋 Final table mapping: {tables}")
+          
+          # Export data for each table (only if table exists)
           results = {}
           
           # Export active companies
-          companies = fetch_data(tables["companies"], {"deletedAt": "is.null"})
-          results["companies"] = len(companies) if not companies.empty else 0
-          if not companies.empty:
-              companies.to_csv("exports/companies.csv", index=False)
+          if "companies" in tables:
+              companies = fetch_data(tables["companies"], {"deletedAt": "is.null"})
+              results["companies"] = len(companies) if not companies.empty else 0
+              if not companies.empty:
+                  companies.to_csv("exports/companies.csv", index=False)
+          else:
+              results["companies"] = 0
               
           # Export active projects
-          projects = fetch_data(tables["projects"], {"deletedAt": "is.null"})
-          results["projects"] = len(projects) if not projects.empty else 0
-          if not projects.empty:
-              projects.to_csv("exports/projects.csv", index=False)
+          if "projects" in tables:
+              projects = fetch_data(tables["projects"], {"deletedAt": "is.null"})
+              results["projects"] = len(projects) if not projects.empty else 0
+              if not projects.empty:
+                  projects.to_csv("exports/projects.csv", index=False)
+          else:
+              results["projects"] = 0
               
           # Export active users
-          users = fetch_data(tables["users"], {"deletedAt": "is.null"})
-          results["users"] = len(users) if not users.empty else 0
-          if not users.empty:
-              # Remove sensitive fields
-              if "password" in users.columns:
-                  users = users.drop(columns=["password"])
-              users.to_csv("exports/users.csv", index=False)
+          if "users" in tables:
+              users = fetch_data(tables["users"], {"deletedAt": "is.null"})
+              results["users"] = len(users) if not users.empty else 0
+              if not users.empty:
+                  # Remove sensitive fields
+                  sensitive_fields = ["password", "password_hash", "encrypted_password", "auth_token", "api_key"]
+                  for field in sensitive_fields:
+                      if field in users.columns:
+                          users = users.drop(columns=[field])
+                  users.to_csv("exports/users.csv", index=False)
+          else:
+              results["users"] = 0
               
           # Export activity types
-          activity_types = fetch_data(tables["activity_types"], {"deletedAt": "is.null"})
-          results["activity_types"] = len(activity_types) if not activity_types.empty else 0
-          if not activity_types.empty:
-              activity_types.to_csv("exports/activity_types.csv", index=False)
+          if "activity_types" in tables:
+              activity_types = fetch_data(tables["activity_types"], {"deletedAt": "is.null"})
+              results["activity_types"] = len(activity_types) if not activity_types.empty else 0
+              if not activity_types.empty:
+                  activity_types.to_csv("exports/activity_types.csv", index=False)
+          else:
+              results["activity_types"] = 0
               
           # Export focus areas
-          focus_areas = fetch_data(tables["focus_areas"], {"deletedAt": "is.null"})
-          results["focus_areas"] = len(focus_areas) if not focus_areas.empty else 0
-          if not focus_areas.empty:
-              focus_areas.to_csv("exports/focus_areas.csv", index=False)
+          if "focus_areas" in tables:
+              focus_areas = fetch_data(tables["focus_areas"], {"deletedAt": "is.null"})
+              results["focus_areas"] = len(focus_areas) if not focus_areas.empty else 0
+              if not focus_areas.empty:
+                  focus_areas.to_csv("exports/focus_areas.csv", index=False)
+          else:
+              results["focus_areas"] = 0
               
           # Export time entries from last 30 days
-          time_entries = fetch_data(tables["time_entries"], 
-                                  {"deletedAt": "is.null", 
-                                   "entryDate": f"gte.{thirty_days_ago}"})
-          results["time_entries"] = len(time_entries) if not time_entries.empty else 0
-          if not time_entries.empty:
-              time_entries.to_csv("exports/time_entries.csv", index=False)
+          if "time_entries" in tables:
+              time_entries = fetch_data(tables["time_entries"], 
+                                      {"deletedAt": "is.null", 
+                                       "entryDate": f"gte.{thirty_days_ago}"})
+              results["time_entries"] = len(time_entries) if not time_entries.empty else 0
+              if not time_entries.empty:
+                  time_entries.to_csv("exports/time_entries.csv", index=False)
+          else:
+              results["time_entries"] = 0
               
           # Export submissions
-          submissions = fetch_data(tables["submissions"], {"deletedAt": "is.null"})
-          results["submissions"] = len(submissions) if not submissions.empty else 0
-          if not submissions.empty:
-              submissions.to_csv("exports/submissions.csv", index=False)
+          if "submissions" in tables:
+              submissions = fetch_data(tables["submissions"], {"deletedAt": "is.null"})
+              results["submissions"] = len(submissions) if not submissions.empty else 0
+              if not submissions.empty:
+                  submissions.to_csv("exports/submissions.csv", index=False)
+          else:
+              results["submissions"] = 0
               
           # Create a summary file with export information
           with open("exports/export_summary.json", "w") as f:
