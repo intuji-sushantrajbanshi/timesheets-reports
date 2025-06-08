@@ -17,6 +17,9 @@ permissions:
 jobs:
   export-data:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -135,8 +138,17 @@ jobs:
               "users": ["users", "user", "User", "profiles", "profile"],
               "activity_types": ["activity_types", "activitytypes", "ActivityType", "activity_type"],
               "focus_areas": ["focus_areas", "focusareas", "FocusArea", "focus_area"],
-              "time_entries": ["time_entries", "timeentries", "TimeEntry", "time_entry"],
-              "submissions": ["submissions", "submission", "Submission"]
+              "time_entries": ["time_entries", "timeentries", "TimeEntry", "time_entry", "timesheet_entries", "timesheets"],
+              "timesheets": ["timesheets", "timesheet", "Timesheet"],
+              "timesheet_entries": ["timesheet_entries", "timesheetentries", "TimesheetEntry", "timesheet_entry"],
+              "clients": ["clients", "client", "Client"],
+              "teams": ["teams", "team", "Team"],
+              "departments": ["departments", "department", "Department"],
+              "jobs": ["jobs", "job", "Job"],
+              "devices": ["devices", "device", "Device"],
+              "documents": ["documents", "document", "Document"],
+              "locations": ["locations", "location", "Location"],
+              "audit_logs": ["audit_logs", "auditlogs", "AuditLog", "audit_log"]
           }
           
           # Find actual table names
@@ -179,7 +191,7 @@ jobs:
               results["users"] = len(users) if not users.empty else 0
               if not users.empty:
                   # Remove sensitive fields
-                  sensitive_fields = ["password", "password_hash", "encrypted_password", "auth_token", "api_key"]
+                  sensitive_fields = ["password", "password_hash", "encrypted_password", "auth_token", "api_key", "remember_token"]
                   for field in sensitive_fields:
                       if field in users.columns:
                           users = users.drop(columns=[field])
@@ -205,25 +217,64 @@ jobs:
           else:
               results["focus_areas"] = 0
               
-          # Export time entries from last 30 days
+          # Export timesheets from last 30 days
+          if "timesheets" in tables:
+              timesheets = fetch_data(tables["timesheets"], 
+                                    {"deletedAt": "is.null"})
+              results["timesheets"] = len(timesheets) if not timesheets.empty else 0
+              if not timesheets.empty:
+                  timesheets.to_csv("exports/timesheets.csv", index=False)
+          else:
+              results["timesheets"] = 0
+              
+          # Export timesheet entries from last 30 days  
+          if "timesheet_entries" in tables:
+              timesheet_entries = fetch_data(tables["timesheet_entries"], 
+                                            {"deletedAt": "is.null", 
+                                             "created_at": f"gte.{thirty_days_ago}"})
+              results["timesheet_entries"] = len(timesheet_entries) if not timesheet_entries.empty else 0
+              if not timesheet_entries.empty:
+                  timesheet_entries.to_csv("exports/timesheet_entries.csv", index=False)
+          else:
+              results["timesheet_entries"] = 0
+              
+          # Export time entries (fallback)
           if "time_entries" in tables:
               time_entries = fetch_data(tables["time_entries"], 
                                       {"deletedAt": "is.null", 
-                                       "entryDate": f"gte.{thirty_days_ago}"})
+                                       "created_at": f"gte.{thirty_days_ago}"})
               results["time_entries"] = len(time_entries) if not time_entries.empty else 0
               if not time_entries.empty:
                   time_entries.to_csv("exports/time_entries.csv", index=False)
           else:
               results["time_entries"] = 0
               
-          # Export submissions
-          if "submissions" in tables:
-              submissions = fetch_data(tables["submissions"], {"deletedAt": "is.null"})
-              results["submissions"] = len(submissions) if not submissions.empty else 0
-              if not submissions.empty:
-                  submissions.to_csv("exports/submissions.csv", index=False)
+          # Export clients
+          if "clients" in tables:
+              clients = fetch_data(tables["clients"], {"deletedAt": "is.null"})
+              results["clients"] = len(clients) if not clients.empty else 0
+              if not clients.empty:
+                  clients.to_csv("exports/clients.csv", index=False)
           else:
-              results["submissions"] = 0
+              results["clients"] = 0
+              
+          # Export teams
+          if "teams" in tables:
+              teams = fetch_data(tables["teams"], {"deletedAt": "is.null"})
+              results["teams"] = len(teams) if not teams.empty else 0
+              if not teams.empty:
+                  teams.to_csv("exports/teams.csv", index=False)
+          else:
+              results["teams"] = 0
+              
+          # Export departments
+          if "departments" in tables:
+              departments = fetch_data(tables["departments"], {"deletedAt": "is.null"})
+              results["departments"] = len(departments) if not departments.empty else 0
+              if not departments.empty:
+                  departments.to_csv("exports/departments.csv", index=False)
+          else:
+              results["departments"] = 0
               
           # Create a summary file with export information
           with open("exports/export_summary.json", "w") as f:
