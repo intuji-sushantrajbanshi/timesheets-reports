@@ -97,6 +97,7 @@ jobs:
           
           # Calculate date for filtering time entries (last 30 days)
           thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+          current_date = datetime.now().strftime("%Y-%m-%d")
           
           # Export active companies
           companies = fetch_data("Company", {"deletedAt": "is.null"})
@@ -151,85 +152,90 @@ jobs:
                       "time_entries": len(time_entries) if not time_entries.empty else 0,
                       "submissions": len(submissions) if not submissions.empty else 0
                   },
-                  "time_entries_period": f"{thirty_days_ago} to {datetime.now().strftime("%Y-%m-%d")}"
+                  "time_entries_period": f"{thirty_days_ago} to {current_date}"
               }
               json.dump(summary, f, indent=2)
           
+          # Get current timestamp for HTML
+          timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+          
           # Create an index.html file for GitHub Pages
+          html_content = f"""<!DOCTYPE html>
+          <html>
+          <head>
+              <title>Supabase Data Exports</title>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <style>
+                  body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; line-height: 1.6; }}
+                  h1 {{ color: #333; }}
+                  .container {{ max-width: 800px; margin: 0 auto; }}
+                  table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+                  th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
+                  th {{ background-color: #f2f2f2; }}
+                  .download-btn {{ display: inline-block; background-color: #4CAF50; color: white; 
+                                  padding: 8px 16px; text-decoration: none; border-radius: 4px; }}
+                  .download-btn:hover {{ background-color: #45a049; }}
+                  .timestamp {{ color: #666; font-style: italic; }}
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <h1>Supabase Data Exports</h1>
+                  <p class="timestamp">Last updated: {timestamp} UTC</p>
+                  
+                  <table>
+                      <tr>
+                          <th>Dataset</th>
+                          <th>Records</th>
+                          <th>Download</th>
+                      </tr>
+                      <tr>
+                          <td>Companies</td>
+                          <td>{len(companies) if not companies.empty else 0}</td>
+                          <td><a href="companies.csv" class="download-btn">Download CSV</a></td>
+                      </tr>
+                      <tr>
+                          <td>Projects</td>
+                          <td>{len(projects) if not projects.empty else 0}</td>
+                          <td><a href="projects.csv" class="download-btn">Download CSV</a></td>
+                      </tr>
+                      <tr>
+                          <td>Users</td>
+                          <td>{len(users) if not users.empty else 0}</td>
+                          <td><a href="users.csv" class="download-btn">Download CSV</a></td>
+                      </tr>
+                      <tr>
+                          <td>Activity Types</td>
+                          <td>{len(activity_types) if not activity_types.empty else 0}</td>
+                          <td><a href="activity_types.csv" class="download-btn">Download CSV</a></td>
+                      </tr>
+                      <tr>
+                          <td>Focus Areas</td>
+                          <td>{len(focus_areas) if not focus_areas.empty else 0}</td>
+                          <td><a href="focus_areas.csv" class="download-btn">Download CSV</a></td>
+                      </tr>
+                      <tr>
+                          <td>Time Entries (Last 30 Days)</td>
+                          <td>{len(time_entries) if not time_entries.empty else 0}</td>
+                          <td><a href="time_entries.csv" class="download-btn">Download CSV</a></td>
+                      </tr>
+                      <tr>
+                          <td>Submissions</td>
+                          <td>{len(submissions) if not submissions.empty else 0}</td>
+                          <td><a href="submissions.csv" class="download-btn">Download CSV</a></td>
+                      </tr>
+                  </table>
+                  
+                  <h2>Export Summary</h2>
+                  <p>Time period for time entries: {thirty_days_ago} to {current_date}</p>
+                  <p><a href="export_summary.json">View detailed export summary (JSON)</a></p>
+              </div>
+          </body>
+          </html>"""
+          
           with open("exports/index.html", "w") as f:
-              f.write(f"""<!DOCTYPE html>
-              <html>
-              <head>
-                  <title>Supabase Data Exports</title>
-                  <meta charset="UTF-8">
-                  <meta name="viewport" content="width=device-width, initial-scale=1">
-                  <style>
-                      body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; line-height: 1.6; }}
-                      h1 {{ color: #333; }}
-                      .container {{ max-width: 800px; margin: 0 auto; }}
-                      table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
-                      th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
-                      th {{ background-color: #f2f2f2; }}
-                      .download-btn {{ display: inline-block; background-color: #4CAF50; color: white; 
-                                      padding: 8px 16px; text-decoration: none; border-radius: 4px; }}
-                      .download-btn:hover {{ background-color: #45a049; }}
-                      .timestamp {{ color: #666; font-style: italic; }}
-                  </style>
-              </head>
-              <body>
-                  <div class="container">
-                      <h1>Supabase Data Exports</h1>
-                      <p class="timestamp">Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} UTC</p>
-                      
-                      <table>
-                          <tr>
-                              <th>Dataset</th>
-                              <th>Records</th>
-                              <th>Download</th>
-                          </tr>
-                          <tr>
-                              <td>Companies</td>
-                              <td>{len(companies) if not companies.empty else 0}</td>
-                              <td><a href="companies.csv" class="download-btn">Download CSV</a></td>
-                          </tr>
-                          <tr>
-                              <td>Projects</td>
-                              <td>{len(projects) if not projects.empty else 0}</td>
-                              <td><a href="projects.csv" class="download-btn">Download CSV</a></td>
-                          </tr>
-                          <tr>
-                              <td>Users</td>
-                              <td>{len(users) if not users.empty else 0}</td>
-                              <td><a href="users.csv" class="download-btn">Download CSV</a></td>
-                          </tr>
-                          <tr>
-                              <td>Activity Types</td>
-                              <td>{len(activity_types) if not activity_types.empty else 0}</td>
-                              <td><a href="activity_types.csv" class="download-btn">Download CSV</a></td>
-                          </tr>
-                          <tr>
-                              <td>Focus Areas</td>
-                              <td>{len(focus_areas) if not focus_areas.empty else 0}</td>
-                              <td><a href="focus_areas.csv" class="download-btn">Download CSV</a></td>
-                          </tr>
-                          <tr>
-                              <td>Time Entries (Last 30 Days)</td>
-                              <td>{len(time_entries) if not time_entries.empty else 0}</td>
-                              <td><a href="time_entries.csv" class="download-btn">Download CSV</a></td>
-                          </tr>
-                          <tr>
-                              <td>Submissions</td>
-                              <td>{len(submissions) if not submissions.empty else 0}</td>
-                              <td><a href="submissions.csv" class="download-btn">Download CSV</a></td>
-                          </tr>
-                      </table>
-                      
-                      <h2>Export Summary</h2>
-                      <p>Time period for time entries: {thirty_days_ago} to {datetime.now().strftime("%Y-%m-%d")}</p>
-                      <p><a href="export_summary.json">View detailed export summary (JSON)</a></p>
-                  </div>
-              </body>
-              </html>""")
+              f.write(html_content)
           
           print("✅ Data export completed successfully")
           '
