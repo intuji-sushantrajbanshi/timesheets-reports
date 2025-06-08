@@ -44,6 +44,40 @@ jobs:
             echo "✅ Supabase credentials found"
           fi
 
+      - name: List available tables
+        run: |
+          python -c '
+          import os
+          import requests
+          import json
+          
+          supabase_url = os.environ["SUPABASE_URL"]
+          supabase_key = os.environ["SUPABASE_KEY"]
+          
+          headers = {
+              "apikey": supabase_key,
+              "Authorization": f"Bearer {supabase_key}",
+              "Content-Type": "application/json"
+          }
+          
+          # Try to get schema information
+          try:
+              response = requests.get(
+                  f"{supabase_url}/rest/v1/",
+                  headers=headers
+              )
+              
+              print(f"Status code: {response.status_code}")
+              print(f"Response: {response.text}")
+              
+              if response.status_code == 200:
+                  print("✅ Successfully connected to Supabase API")
+              else:
+                  print(f"❌ Error connecting to Supabase API: {response.status_code}")
+          except Exception as e:
+              print(f"❌ Error: {str(e)}")
+          '
+
       - name: Export data from Supabase
         run: |
           mkdir -p exports
@@ -103,15 +137,15 @@ jobs:
           thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
           current_date = datetime.now().strftime("%Y-%m-%d")
           
-          # Define tables based on your schema (using exact names from schema)
+          # Define tables with lowercase names (PostgreSQL often uses lowercase)
           tables = {
-              "companies": "Company",
-              "projects": "Project",
-              "users": "User",
-              "activity_types": "ActivityType",
-              "focus_areas": "FocusArea",
-              "time_entries": "TimeEntry",
-              "submissions": "Submission"
+              "companies": "company",
+              "projects": "project",
+              "users": "user",
+              "activity_types": "activitytype",
+              "focus_areas": "focusarea",
+              "time_entries": "timeentry",
+              "submissions": "submission"
           }
           
           # Export data for each table
