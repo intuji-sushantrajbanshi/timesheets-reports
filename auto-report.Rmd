@@ -1,90 +1,81 @@
 ---
-title: "Automated Init- SQL Data Import"
+title: "Timesheets Database Report"
 author: "Sushant Rajbanshi"
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
-output: pdf_document
+output: 
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6)
 library(DBI)
 library(RPostgres)
 library(dplyr)
 library(ggplot2)
-library(httr)       # Added for the GET function
-library(jsonlite)   # Added for the fromJSON function
-library(lubridate)  # Added for as_datetime function
+library(httr)
+library(jsonlite)
+library(lubridate)
+library(scales)
+library(forcats)
 
-## Fetch secrets
+# Fetch secrets
 supabase_url <- Sys.getenv("SUPABASE_URL")
 supabase_key <- Sys.getenv("SUPABASE_KEY")
-#supabase_user <- Sys.getenv("SUPABASE_USER")
-#supabase_password <- Sys.getenv("SUPABASE_PASSWORD")
-#supabase_db <- Sys.getenv("SUPABASE_DB")
+
+# Validate credentials
+if (is.null(supabase_url) || supabase_url == "" || is.null(supabase_key) || supabase_key == "") {
+  stop("Supabase credentials not found in environment variables")
+}
 ```
 
-## Data Report
+# Executive Summary
 
+This report provides an automated analysis of timesheet data from our Supabase PostgreSQL database, generated on `r format(Sys.Date(), '%B %d, %Y')`.
 
-This report is automatically generated from our Supabase PostgreSQL database.
-
-```{r fetch-data}
-# Function to fetch data from Supabase using REST API
-fetch_supabase_data <- function(url, api_key, table_name, query_params = NULL) {
-  # Build the API endpoint
+```{r fetch-functions}
+# Enhanced function to fetch data from Supabase using REST API
+fetch_supabase_data <- function(url, api_key, table_name, query_params = NULL, select_fields = "*") {
   endpoint <- paste0(url, "/rest/v1/", table_name)
-
-  # Prepare headers
+  
   headers <- c(
     "apikey" = api_key,
     "Authorization" = paste("Bearer", api_key),
     "Content-Type" = "application/json",
     "Prefer" = "return=representation"
   )
-
-  # Build query parameters
-  if (is.null(query_params)) {
-    # Default: get data from last 7 days
-    query_params <- list(
-      # Using Supabase's PostgREST syntax
-      `created_at` = paste0("gte.", format(Sys.Date() - 7, "%Y-%m-%d"))
-    )
+  
+  # Add select parameter
+  if (!is.null(select_fields) && select_fields != "*") {
+    if (is.null(query_params)) {
+      query_params <- list()
+    }
+    query_params[["select"]] <- select_fields
   }
-
+  
   tryCatch({
-    # Make the GET request
     response <- GET(
       url = endpoint,
       add_headers(.headers = headers),
       query = query_params
     )
-
-    # Check for successful response
+    
     if (http_status(response)$category == "Success") {
-      # Parse the JSON response
       data <- fromJSON(content(response, "text", encoding = "UTF-8"), flatten = TRUE)
-
-      # Log success
       write("SUCCESS", "query_status.txt")
-
-      # Convert to data frame if it isn't already
-      if (!is.data.frame(data)) {
-        if (length(data) == 0) {
-          # Return empty data frame with expected columns
-          data <- data.frame(
-            id = integer(0),
-            value = numeric(0),
-            created_at = character(0),
-            description = character(0)
-          )
-        } else {
-          data <- as.data.frame(data)
-        }
+      
+      if (length(data) == 0) {
+        return(data.frame())
       }
-
+      
+      if (!is.data.frame(data)) {
+        data <- as.data.frame(data)
+      }
+      
       return(data)
     } else {
-      # Log error
       error_msg <- paste("API Error:", http_status(response)$message,
                         "-", content(response, "text", encoding = "UTF-8"))
       write(error_msg, "error_log.txt")
@@ -92,55 +83,270 @@ fetch_supabase_data <- function(url, api_key, table_name, query_params = NULL) {
       stop(error_msg)
     }
   }, error = function(e) {
-    # Log connection errors
     write(paste("ERROR:", e$message), "error_log.txt")
     write("FAILED", "query_status.txt")
     stop(paste("Supabase API request failed:", e$message))
   })
 }
 
-# Fetch data from Supabase
-data <- fetch_supabase_data(
-  url = supabase_url,
-  api_key = supabase_key,
-  table_name = "init_sample_table"
-)
-```
-
-
-```{r analyze, eval=file.exists("query_status.txt") && readLines("query_status.txt")[1] == "SUCCESS"}
-# Data analysis code runs only if query was successful
-
-# Check if we have data
-if(nrow(data) == 0) {
-  cat("No data available for the selected period.")
-} else {
-  # Convert date strings to proper date objects if needed
-  if("created_at" %in% colnames(data) && !inherits(data$created_at, "Date")) {
-    data$created_at <- as_datetime(data$created_at)
-  }
-
-  # Summary statistics
-  summary_stats <- data %>%
-    summarize(
-      count = n(),
-      avg_value = mean(value, na.rm = TRUE),
-      max_value = max(value, na.rm = TRUE),
-      min_value = min(value, na.rm = TRUE)
-    )
-
-  knitr::kable(summary_stats, caption = "Summary Statistics")
-
-  # Create a visualization
-  ggplot(data, aes(x = created_at, y = value)) +
-    geom_line() +
-    geom_point() +
-    theme_minimal() +
-    labs(title = "Weekly Trend", x = "Date", y = "value")
+# Fetch data with error handling
+safe_fetch <- function(table_name, query_params = NULL, select_fields = "*") {
+  tryCatch({
+    fetch_supabase_data(supabase_url, supabase_key, table_name, query_params, select_fields)
+  }, error = function(e) {
+    cat("Warning: Could not fetch", table_name, "data:", e$message, "\n")
+    return(data.frame())
+  })
 }
 ```
 
+```{r fetch-data}
+# Fetch all necessary data
+cat("Fetching data from Supabase...\n")
 
-## Conclusion
+# Get active companies
+companies <- safe_fetch("Company", list("deletedAt" = "is.null"))
 
-Report generated automatically at `r Sys.time()`.
+# Get projects
+projects <- safe_fetch("Project", list("deletedAt" = "is.null"))
+
+# Get users
+users <- safe_fetch("User", list("deletedAt" = "is.null"))
+
+# Get activity types
+activity_types <- safe_fetch("ActivityType", list("deletedAt" = "is.null"))
+
+# Get time entries from last 30 days
+last_30_days <- format(Sys.Date() - 30, "%Y-%m-%d")
+time_entries <- safe_fetch("TimeEntry", 
+                          list("deletedAt" = "is.null",
+                               "entryDate" = paste0("gte.", last_30_days)))
+
+cat("Data fetching completed.\n")
+```
+
+```{r data-processing}
+# Check if we have data
+has_data <- nrow(time_entries) > 0 && nrow(projects) > 0 && nrow(users) > 0
+
+if (has_data) {
+  # Process time entries
+  time_entries_processed <- time_entries %>%
+    mutate(
+      entryDate = as.Date(entryDate),
+      startTime = as.POSIXct(startTime),
+      endTime = as.POSIXct(endTime),
+      # Calculate duration in hours if not provided
+      calculated_duration = ifelse(
+        is.na(duration) | duration == 0,
+        as.numeric(difftime(endTime, startTime, units = "hours")),
+        duration / 60  # Assuming duration is in minutes
+      )
+    ) %>%
+    filter(calculated_duration > 0 & calculated_duration < 24) # Remove invalid entries
+  
+  # Join with other tables
+  detailed_entries <- time_entries_processed %>%
+    left_join(projects %>% select(id, title, companyId), 
+              by = c("projectId" = "id"), suffix = c("", "_project")) %>%
+    left_join(users %>% select(id, firstName, lastName, email), 
+              by = c("userId" = "id"), suffix = c("", "_user")) %>%
+    left_join(activity_types %>% select(id, title), 
+              by = c("activityTypeId" = "id"), suffix = c("", "_activity")) %>%
+    left_join(companies %>% select(id, name), 
+              by = c("companyId" = "id"), suffix = c("", "_company")) %>%
+    mutate(
+      user_name = paste(firstName, lastName),
+      project_title = coalesce(title, "Unknown Project"),
+      activity_title = coalesce(title_activity, "Unknown Activity"),
+      company_name = coalesce(name, "Unknown Company")
+    )
+}
+```
+
+# Data Overview
+
+```{r summary-stats, eval=has_data}
+# Summary statistics
+total_entries <- nrow(detailed_entries)
+total_hours <- sum(detailed_entries$calculated_duration, na.rm = TRUE)
+unique_users <- n_distinct(detailed_entries$userId)
+unique_projects <- n_distinct(detailed_entries$projectId, na.rm = TRUE)
+date_range <- range(detailed_entries$entryDate, na.rm = TRUE)
+
+summary_table <- data.frame(
+  Metric = c("Total Time Entries", "Total Hours Logged", "Active Users", "Active Projects", "Date Range"),
+  Value = c(
+    format(total_entries, big.mark = ","),
+    format(round(total_hours, 2), big.mark = ","),
+    unique_users,
+    unique_projects,
+    paste(format(date_range[1], "%B %d"), "to", format(date_range[2], "%B %d, %Y"))
+  )
+)
+
+knitr::kable(summary_table, caption = "Summary Statistics (Last 30 Days)")
+```
+
+```{r no-data-message, eval=!has_data}
+cat("No time entry data available for the last 30 days or required tables are empty.\n")
+cat("Please check your database connection and data.\n")
+```
+
+# Time Logging Analysis
+
+```{r daily-hours-chart, eval=has_data, fig.cap="Daily Hours Logged"}
+# Daily hours trend
+daily_summary <- detailed_entries %>%
+  group_by(entryDate) %>%
+  summarise(
+    total_hours = sum(calculated_duration, na.rm = TRUE),
+    entries_count = n(),
+    .groups = "drop"
+  )
+
+ggplot(daily_summary, aes(x = entryDate, y = total_hours)) +
+  geom_line(color = "steelblue", size = 1) +
+  geom_point(color = "steelblue", size = 2) +
+  geom_smooth(method = "loess", se = FALSE, color = "red", linetype = "dashed") +
+  scale_x_date(date_labels = "%b %d", date_breaks = "3 days") +
+  scale_y_continuous(labels = number_format(accuracy = 0.1, suffix = "h")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(
+    title = "Daily Hours Logged Over Time",
+    x = "Date",
+    y = "Hours Logged",
+    subtitle = paste("Trend over last", nrow(daily_summary), "days")
+  )
+```
+
+```{r user-performance, eval=has_data, fig.cap="Top Users by Hours Logged"}
+# Top users by hours
+user_summary <- detailed_entries %>%
+  group_by(user_name, email) %>%
+  summarise(
+    total_hours = sum(calculated_duration, na.rm = TRUE),
+    entries_count = n(),
+    avg_daily_hours = total_hours / n_distinct(entryDate),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(total_hours)) %>%
+  head(10)
+
+ggplot(user_summary, aes(x = reorder(user_name, total_hours), y = total_hours)) +
+  geom_col(fill = "lightblue", color = "steelblue") +
+  geom_text(aes(label = paste0(round(total_hours, 1), "h")), 
+            hjust = -0.1, size = 3) +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Top 10 Users by Total Hours Logged",
+    x = "User",
+    y = "Total Hours",
+    subtitle = "Last 30 days"
+  )
+```
+
+# Project Analysis
+
+```{r project-breakdown, eval=has_data && nrow(detailed_entries %>% filter(!is.na(projectId))) > 0, fig.cap="Hours by Project"}
+# Project breakdown
+project_summary <- detailed_entries %>%
+  filter(!is.na(projectId)) %>%
+  group_by(project_title, company_name) %>%
+  summarise(
+    total_hours = sum(calculated_duration, na.rm = TRUE),
+    entries_count = n(),
+    unique_users = n_distinct(userId),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(total_hours)) %>%
+  head(15)
+
+if (nrow(project_summary) > 0) {
+  ggplot(project_summary, aes(x = reorder(project_title, total_hours), y = total_hours)) +
+    geom_col(aes(fill = company_name), color = "white") +
+    geom_text(aes(label = paste0(round(total_hours, 1), "h")), 
+              hjust = -0.1, size = 3) +
+    coord_flip() +
+    theme_minimal() +
+    theme(legend.position = "bottom") +
+    labs(
+      title = "Top 15 Projects by Hours Logged",
+      x = "Project",
+      y = "Total Hours",
+      fill = "Company",
+      subtitle = "Last 30 days"
+    )
+  
+  # Project summary table
+  project_table <- project_summary %>%
+    select(project_title, company_name, total_hours, entries_count, unique_users) %>%
+    mutate(total_hours = round(total_hours, 2))
+  
+  knitr::kable(project_table, 
+               col.names = c("Project", "Company", "Hours", "Entries", "Users"),
+               caption = "Top Projects Summary")
+}
+```
+
+# Activity Type Analysis
+
+```{r activity-analysis, eval=has_data, fig.cap="Hours by Activity Type"}
+# Activity type breakdown
+activity_summary <- detailed_entries %>%
+  group_by(activity_title) %>%
+  summarise(
+    total_hours = sum(calculated_duration, na.rm = TRUE),
+    entries_count = n(),
+    avg_duration = mean(calculated_duration, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(total_hours))
+
+if (nrow(activity_summary) > 0) {
+  ggplot(activity_summary, aes(x = reorder(activity_title, total_hours), y = total_hours)) +
+    geom_col(fill = "lightgreen", color = "darkgreen") +
+    geom_text(aes(label = paste0(round(total_hours, 1), "h")), 
+              hjust = -0.1, size = 3) +
+    coord_flip() +
+    theme_minimal() +
+    labs(
+      title = "Hours Logged by Activity Type",
+      x = "Activity Type",
+      y = "Total Hours",
+      subtitle = "Last 30 days"
+    )
+  
+  knitr::kable(activity_summary %>% mutate(across(where(is.numeric), round, 2)), 
+               col.names = c("Activity Type", "Total Hours", "Entries", "Avg Duration"),
+               caption = "Activity Type Summary")
+}
+```
+
+# Detailed Tables
+
+```{r recent-entries, eval=has_data}
+# Recent entries table
+recent_entries <- detailed_entries %>%
+  arrange(desc(entryDate), desc(startTime)) %>%
+  select(entryDate, user_name, project_title, activity_title, calculated_duration, description) %>%
+  head(20) %>%
+  mutate(
+    calculated_duration = round(calculated_duration, 2),
+    description = ifelse(is.na(description) | description == "", "No description", 
+                        substr(description, 1, 50))
+  )
+
+knitr::kable(recent_entries,
+             col.names = c("Date", "User", "Project", "Activity", "Hours", "Description"),
+             caption = "20 Most Recent Time Entries")
+```
+
+---
+
+**Report generated automatically at:** `r Sys.time()`  
+**Data source:** Supabase PostgreSQL Database  
+**Period covered:** Last 30 days  
+**Total records processed:** `r if(has_data) format(nrow(time_entries), big.mark = ",") else "0"`
