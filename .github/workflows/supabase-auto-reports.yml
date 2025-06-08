@@ -42,7 +42,7 @@ jobs:
             echo "✅ Supabase credentials found"
           fi
 
-      - name: Export data from Supabase
+      - name: Export project time data from Supabase
         run: |
           mkdir -p exports
           python -c '
@@ -50,7 +50,7 @@ jobs:
           import requests
           import pandas as pd
           import json
-          from datetime import datetime, timedelta
+          from datetime import datetime
           
           # Configuration
           supabase_url = os.environ["SUPABASE_URL"]
@@ -95,10 +95,6 @@ jobs:
                   print(f"❌ Error fetching {table_name}: {str(e)}")
                   return pd.DataFrame()
           
-          # Calculate date for filtering time entries (last 30 days)
-          thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-          current_date = datetime.now().strftime("%Y-%m-%d")
-          
           # Function to get all available tables
           def get_available_tables():
               """Get list of all available tables from Supabase"""
@@ -119,31 +115,18 @@ jobs:
               except Exception as e:
                   print(f"Could not fetch table list: {e}")
               
-              # Fallback: common lowercase table names
-              return ["companies", "projects", "users", "activity_types", "focus_areas", "time_entries", "submissions"]
+              # Fallback: common table names
+              return ["TimeEntry", "Project", "User", "time_entries", "projects", "users"]
           
           # Get available tables
           available_tables = get_available_tables()
           print(f"🔍 Available tables: {available_tables}")
           
-          # Map common table names to what might exist in your database
+          # Map table names to what might exist in your database
           table_mapping = {
-              "companies": ["companies", "company", "Company"],
-              "projects": ["projects", "project", "Project"], 
-              "users": ["users", "user", "User", "profiles", "profile"],
-              "activity_types": ["activity_types", "activitytypes", "ActivityType", "activity_type"],
-              "focus_areas": ["focus_areas", "focusareas", "FocusArea", "focus_area"],
-              "time_entries": ["time_entries", "timeentries", "TimeEntry", "time_entry", "timesheet_entries", "timesheets"],
-              "timesheets": ["timesheets", "timesheet", "Timesheet"],
-              "timesheet_entries": ["timesheet_entries", "timesheetentries", "TimesheetEntry", "timesheet_entry"],
-              "clients": ["clients", "client", "Client"],
-              "teams": ["teams", "team", "Team"],
-              "departments": ["departments", "department", "Department"],
-              "jobs": ["jobs", "job", "Job"],
-              "devices": ["devices", "device", "Device"],
-              "documents": ["documents", "document", "Document"],
-              "locations": ["locations", "location", "Location"],
-              "audit_logs": ["audit_logs", "auditlogs", "AuditLog", "audit_log"]
+              "time_entries": ["TimeEntry", "time_entries", "timeentries", "time_entry"],
+              "projects": ["Project", "projects", "project"],
+              "users": ["User", "users", "user", "profiles", "profile"]
           }
           
           # Find actual table names
@@ -159,216 +142,95 @@ jobs:
           
           print(f"📋 Final table mapping: {tables}")
           
-          # Export data for each table (only if table exists)
-          results = {}
-          
-          # Export active companies
-          if "companies" in tables:
-              companies = fetch_data(tables["companies"], {"deletedAt": "is.null"})
-              results["companies"] = len(companies) if not companies.empty else 0
-              if not companies.empty:
-                  companies.to_csv("exports/companies.csv", index=False)
-          else:
-              results["companies"] = 0
-              
-          # Export active projects
-          if "projects" in tables:
-              projects = fetch_data(tables["projects"], {"deletedAt": "is.null"})
-              results["projects"] = len(projects) if not projects.empty else 0
-              if not projects.empty:
-                  projects.to_csv("exports/projects.csv", index=False)
-          else:
-              results["projects"] = 0
-              
-          # Export active users
-          if "users" in tables:
-              users = fetch_data(tables["users"], {"deletedAt": "is.null"})
-              results["users"] = len(users) if not users.empty else 0
-              if not users.empty:
-                  # Remove sensitive fields
-                  sensitive_fields = ["password", "password_hash", "encrypted_password", "auth_token", "api_key", "remember_token"]
-                  for field in sensitive_fields:
-                      if field in users.columns:
-                          users = users.drop(columns=[field])
-                  users.to_csv("exports/users.csv", index=False)
-          else:
-              results["users"] = 0
-              
-          # Export activity types
-          if "activity_types" in tables:
-              activity_types = fetch_data(tables["activity_types"], {"deletedAt": "is.null"})
-              results["activity_types"] = len(activity_types) if not activity_types.empty else 0
-              if not activity_types.empty:
-                  activity_types.to_csv("exports/activity_types.csv", index=False)
-          else:
-              results["activity_types"] = 0
-              
-          # Export focus areas
-          if "focus_areas" in tables:
-              focus_areas = fetch_data(tables["focus_areas"], {"deletedAt": "is.null"})
-              results["focus_areas"] = len(focus_areas) if not focus_areas.empty else 0
-              if not focus_areas.empty:
-                  focus_areas.to_csv("exports/focus_areas.csv", index=False)
-          else:
-              results["focus_areas"] = 0
-              
-          # Export timesheets from last 30 days
-          if "timesheets" in tables:
-              timesheets = fetch_data(tables["timesheets"], 
-                                    {"deletedAt": "is.null"})
-              results["timesheets"] = len(timesheets) if not timesheets.empty else 0
-              if not timesheets.empty:
-                  timesheets.to_csv("exports/timesheets.csv", index=False)
-          else:
-              results["timesheets"] = 0
-              
-          # Export timesheet entries from last 30 days  
-          if "timesheet_entries" in tables:
-              timesheet_entries = fetch_data(tables["timesheet_entries"], 
-                                            {"deletedAt": "is.null", 
-                                             "created_at": f"gte.{thirty_days_ago}"})
-              results["timesheet_entries"] = len(timesheet_entries) if not timesheet_entries.empty else 0
-              if not timesheet_entries.empty:
-                  timesheet_entries.to_csv("exports/timesheet_entries.csv", index=False)
-          else:
-              results["timesheet_entries"] = 0
-              
-          # Export time entries (fallback)
-          if "time_entries" in tables:
-              time_entries = fetch_data(tables["time_entries"], 
-                                      {"deletedAt": "is.null", 
-                                       "created_at": f"gte.{thirty_days_ago}"})
-              results["time_entries"] = len(time_entries) if not time_entries.empty else 0
-              if not time_entries.empty:
-                  time_entries.to_csv("exports/time_entries.csv", index=False)
-          else:
-              results["time_entries"] = 0
-              
-          # Export clients
-          if "clients" in tables:
-              clients = fetch_data(tables["clients"], {"deletedAt": "is.null"})
-              results["clients"] = len(clients) if not clients.empty else 0
-              if not clients.empty:
-                  clients.to_csv("exports/clients.csv", index=False)
-          else:
-              results["clients"] = 0
-              
-          # Export teams
-          if "teams" in tables:
-              teams = fetch_data(tables["teams"], {"deletedAt": "is.null"})
-              results["teams"] = len(teams) if not teams.empty else 0
-              if not teams.empty:
-                  teams.to_csv("exports/teams.csv", index=False)
-          else:
-              results["teams"] = 0
-              
-          # Export departments
-          if "departments" in tables:
-              departments = fetch_data(tables["departments"], {"deletedAt": "is.null"})
-              results["departments"] = len(departments) if not departments.empty else 0
-              if not departments.empty:
-                  departments.to_csv("exports/departments.csv", index=False)
-          else:
-              results["departments"] = 0
-              
-          # Create a summary file with export information
-          with open("exports/export_summary.json", "w") as f:
-              summary = {
-                  "export_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                  "tables_exported": results,
-                  "time_entries_period": f"{thirty_days_ago} to {current_date}"
-              }
-              json.dump(summary, f, indent=2)
-          
-          # Create consolidated project time report
+          # Create project time report matching the SQL query format
           def create_project_time_report():
-              """Create a consolidated CSV report with time data arranged by project names"""
+              """Create project time report matching SQL query format"""
               try:
-                  # First, get all projects
-                  projects_df = pd.DataFrame()
-                  if "projects" in tables:
-                      projects_df = fetch_data(tables["projects"], {"deletedAt": "is.null"})
+                  # Check if we have all required tables
+                  if not all(key in tables for key in ["time_entries", "projects", "users"]):
+                      print("❌ Missing required tables for project time report")
+                      return False
                   
-                  # Get users data
-                  users_df = pd.DataFrame()
-                  if "users" in tables:
-                      users_df = fetch_data(tables["users"], {"deletedAt": "is.null"})
-                      # Remove sensitive fields from users
-                      sensitive_fields = ["password", "password_hash", "encrypted_password", "auth_token", "api_key", "remember_token"]
-                      for field in sensitive_fields:
-                          if field in users_df.columns:
-                              users_df = users_df.drop(columns=[field])
+                  # Fetch data from all required tables
+                  print("📊 Fetching time entries...")
+                  time_entries_df = fetch_data(tables["time_entries"], {"deletedAt": "is.null"})
                   
-                  # Get time entries data (try different possible table names)
-                  time_entries_df = pd.DataFrame()
-                  time_table_used = None
+                  print("📊 Fetching projects...")  
+                  projects_df = fetch_data(tables["projects"], {"deletedAt": "is.null"})
                   
-                  # Try different time entry table names
-                  for time_table_key in ["time_entries", "timesheet_entries", "timesheets"]:
-                      if time_table_key in tables:
-                          temp_df = fetch_data(tables[time_table_key], {"deletedAt": "is.null"})
-                          if not temp_df.empty:
-                              time_entries_df = temp_df
-                              time_table_used = time_table_key
-                              print(f"✅ Using time data from: {tables[time_table_key]}")
-                              break
+                  print("📊 Fetching users...")
+                  users_df = fetch_data(tables["users"], {"deletedAt": "is.null"})
                   
-                  if projects_df.empty or users_df.empty or time_entries_df.empty:
-                      print("❌ Missing required data for project time report")
-                      print(f"Projects: {len(projects_df)}, Users: {len(users_df)}, Time entries: {len(time_entries_df)}")
-                      return
+                  if time_entries_df.empty or projects_df.empty or users_df.empty:
+                      print("❌ One or more required tables are empty")
+                      return False
                   
                   # Print column names for debugging
+                  print(f"📋 Time entries columns: {list(time_entries_df.columns)}")
                   print(f"📋 Projects columns: {list(projects_df.columns)}")
                   print(f"📋 Users columns: {list(users_df.columns)}")
-                  print(f"📋 Time entries columns: {list(time_entries_df.columns)}")
                   
-                  # Try to identify the correct column names (case-insensitive matching)
+                  # Find column names (case-insensitive matching)
                   def find_column(df, possible_names):
                       """Find column name from list of possibilities (case-insensitive)"""
                       df_columns = [col.lower() for col in df.columns]
                       for name in possible_names:
                           if name.lower() in df_columns:
-                              # Return the actual column name with correct case
                               return df.columns[df_columns.index(name.lower())]
                       return None
                   
-                  # Map column names
+                  # Map column names for projects
                   project_id_col = find_column(projects_df, ["id", "project_id", "projectId"])
-                  project_name_col = find_column(projects_df, ["title", "name", "project_name", "projectName"])
+                  project_title_col = find_column(projects_df, ["title", "name", "project_name", "projectName"])
                   
+                  # Map column names for users
                   user_id_col = find_column(users_df, ["id", "user_id", "userId"])
                   user_first_name_col = find_column(users_df, ["firstName", "first_name", "fname"])
                   user_last_name_col = find_column(users_df, ["lastName", "last_name", "lname"])
                   user_email_col = find_column(users_df, ["email", "email_address"])
                   
+                  # Map column names for time entries
                   time_project_id_col = find_column(time_entries_df, ["projectId", "project_id", "project"])
                   time_user_id_col = find_column(time_entries_df, ["userId", "user_id", "user"])
                   time_duration_col = find_column(time_entries_df, ["duration", "hours", "time_spent", "total_time"])
-                  time_start_col = find_column(time_entries_df, ["startTime", "start_time", "started_at", "start"])
-                  time_end_col = find_column(time_entries_df, ["endTime", "end_time", "ended_at", "end"])
-                  time_date_col = find_column(time_entries_df, ["entryDate", "entry_date", "date", "created_at"])
+                  time_entry_date_col = find_column(time_entries_df, ["entryDate", "entry_date", "date", "created_at"])
                   
                   print(f"🔍 Column mapping:")
-                  print(f"   Project: id={project_id_col}, name={project_name_col}")
+                  print(f"   Project: id={project_id_col}, title={project_title_col}")
                   print(f"   User: id={user_id_col}, first={user_first_name_col}, last={user_last_name_col}, email={user_email_col}")
                   print(f"   Time: project_id={time_project_id_col}, user_id={time_user_id_col}, duration={time_duration_col}")
                   
-                  # Check if we have the essential columns
-                  if not all([project_id_col, project_name_col, user_id_col, time_project_id_col, time_user_id_col]):
+                  # Check if we have essential columns
+                  if not all([project_id_col, project_title_col, user_id_col, time_project_id_col, time_user_id_col]):
                       print("❌ Cannot find essential columns for project time report")
-                      return
+                      return False
                   
-                  # Merge the data
-                  # First merge time entries with projects
+                  # Filter projects for only the two we want
+                  target_projects = [
+                      "Department of Health (Government of Western Australia)",
+                      "Coerco"
+                  ]
+                  
+                  projects_filtered = projects_df[
+                      projects_df[project_title_col].isin(target_projects)
+                  ]
+                  
+                  if projects_filtered.empty:
+                      print("❌ Target projects not found")
+                      print(f"Available projects: {projects_df[project_title_col].tolist()}")
+                      return False
+                  
+                  print(f"✅ Found {len(projects_filtered)} target projects")
+                  
+                  # Merge time entries with filtered projects
                   merged_df = time_entries_df.merge(
-                      projects_df[[project_id_col, project_name_col]], 
+                      projects_filtered[[project_id_col, project_title_col]], 
                       left_on=time_project_id_col, 
                       right_on=project_id_col, 
                       how="inner"
                   )
                   
-                  # Then merge with users
+                  # Merge with users
                   user_cols_to_merge = [user_id_col]
                   if user_first_name_col: user_cols_to_merge.append(user_first_name_col)
                   if user_last_name_col: user_cols_to_merge.append(user_last_name_col)
@@ -383,133 +245,145 @@ jobs:
                   
                   if merged_df.empty:
                       print("❌ No data after merging tables")
-                      return
+                      return False
                   
                   print(f"✅ Successfully merged data: {len(merged_df)} time entries")
                   
                   # Create user name column
                   if user_first_name_col and user_last_name_col:
-                      merged_df["user_name"] = merged_df[user_first_name_col].fillna("") + " " + merged_df[user_last_name_col].fillna("")
-                      merged_df["user_name"] = merged_df["user_name"].str.strip()
+                      merged_df["user_name"] = (
+                          merged_df[user_first_name_col].fillna("").astype(str) + " " + 
+                          merged_df[user_last_name_col].fillna("").astype(str)
+                      ).str.strip()
                   else:
                       merged_df["user_name"] = merged_df[user_email_col] if user_email_col else "Unknown User"
                   
-                  # Calculate duration (try multiple approaches)
-                  merged_df["calculated_duration"] = 0
-                  
-                  # Method 1: Use existing duration column (convert to minutes if needed)
+                  # Calculate duration
                   if time_duration_col and time_duration_col in merged_df.columns:
-                      duration_values = pd.to_numeric(merged_df[time_duration_col], errors="coerce").fillna(0)
-                      # If values are very large, they might be in milliseconds or seconds
-                      if duration_values.max() > 1440:  # More than 24 hours in minutes
-                          if duration_values.max() > 86400:  # More than 24 hours in seconds
-                              duration_values = duration_values / 60  # Convert seconds to minutes
-                          else:
-                              duration_values = duration_values  # Already in minutes
-                      merged_df["calculated_duration"] = duration_values
-                  
-                  # Method 2: Calculate from start/end times
-                  elif time_start_col and time_end_col:
-                      try:
-                          merged_df[time_start_col] = pd.to_datetime(merged_df[time_start_col], errors="coerce")
-                          merged_df[time_end_col] = pd.to_datetime(merged_df[time_end_col], errors="coerce")
-                          time_diff = (merged_df[time_end_col] - merged_df[time_start_col]).dt.total_seconds() / 60
-                          merged_df["calculated_duration"] = time_diff.fillna(0)
-                      except Exception as e:
-                          print(f"⚠️ Could not calculate duration from start/end times: {e}")
+                      merged_df["duration_minutes"] = pd.to_numeric(merged_df[time_duration_col], errors="coerce").fillna(0)
+                  else:
+                      merged_df["duration_minutes"] = 0
+                      print("⚠️ No duration column found, using 0 for all entries")
                   
                   # Group by project and user
-                  grouped = merged_df.groupby([project_name_col, "user_name", user_email_col if user_email_col else "user_name"]).agg({
-                      "calculated_duration": ["sum", "count"],
-                      time_date_col: ["min", "max"] if time_date_col else ["count", "count"]
-                  }).reset_index()
+                  group_cols = [project_title_col, "user_name"]
+                  if user_email_col:
+                      group_cols.append(user_email_col)
+                  
+                  agg_dict = {
+                      "duration_minutes": ["sum", "count"]
+                  }
+                  
+                  if time_entry_date_col:
+                      agg_dict[time_entry_date_col] = ["min", "max"]
+                  
+                  grouped = merged_df.groupby(group_cols).agg(agg_dict).reset_index()
                   
                   # Flatten column names
-                  grouped.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in grouped.columns]
-                  
-                  # Rename columns for clarity
-                  column_renames = {}
+                  new_columns = []
                   for col in grouped.columns:
-                      if "calculated_duration_sum" in col:
-                          column_renames[col] = "total_duration_minutes"
-                      elif "calculated_duration_count" in col:
-                          column_renames[col] = "total_entries"
-                      elif time_date_col and f"{time_date_col}_min" in col:
-                          column_renames[col] = "first_entry_date"
-                      elif time_date_col and f"{time_date_col}_max" in col:
-                          column_renames[col] = "last_entry_date"
+                      if isinstance(col, tuple):
+                          if col[1]:
+                              new_columns.append(f"{col[0]}_{col[1]}")
+                          else:
+                              new_columns.append(col[0])
+                      else:
+                          new_columns.append(col)
+                  grouped.columns = new_columns
                   
-                  grouped = grouped.rename(columns=column_renames)
+                  # Rename columns to match expected format
+                  column_mapping = {
+                      project_title_col: "project",
+                      "user_name": "user_name",
+                      "duration_minutes_sum": "total_duration_raw",
+                      "duration_minutes_count": "total_entries"
+                  }
                   
-                  # Calculate hours
-                  if "total_duration_minutes" in grouped.columns:
-                      grouped["total_hours"] = (grouped["total_duration_minutes"] / 60).round(2)
-                  else:
-                      grouped["total_hours"] = 0
+                  if user_email_col:
+                      column_mapping[user_email_col] = "user_email"
                   
-                  # Rename project column
-                  project_col_name = [col for col in grouped.columns if project_name_col in col][0]
-                  grouped = grouped.rename(columns={project_col_name: "project_name"})
+                  if time_entry_date_col:
+                      column_mapping[f"{time_entry_date_col}_min"] = "first_entry_date"
+                      column_mapping[f"{time_entry_date_col}_max"] = "last_entry_date"
                   
-                  # Sort by project name and total hours (descending)
-                  grouped = grouped.sort_values(["project_name", "total_hours"], ascending=[True, False])
+                  grouped = grouped.rename(columns=column_mapping)
                   
-                  # Create final report with separators between projects
-                  final_report = []
-                  current_project = None
+                  # Add total_hours column (same as total_duration_raw based on your data)
+                  grouped["total_hours"] = grouped["total_duration_raw"]
                   
-                  for _, row in grouped.iterrows():
-                      # Add separator when project changes
-                      if current_project != row["project_name"]:
-                          if current_project is not None:  # Not the first project
-                              final_report.append({
-                                  "project_name": "--- SEPARATOR ---",
-                                  "user_name": "",
-                                  "user_email": "",
-                                  "total_duration_minutes": None,
-                                  "total_hours": None,
-                                  "total_entries": None,
-                                  "first_entry_date": None,
-                                  "last_entry_date": None
-                              })
-                          current_project = row["project_name"]
-                      
-                      # Add the actual data row
-                      report_row = {
-                          "project_name": row["project_name"],
-                          "user_name": row["user_name"],
-                          "user_email": row.get(user_email_col + "_", row["user_name"]) if user_email_col else row["user_name"],
-                          "total_duration_minutes": row.get("total_duration_minutes", 0),
-                          "total_hours": row.get("total_hours", 0),
-                          "total_entries": row.get("total_entries", 0),
-                          "first_entry_date": row.get("first_entry_date", ""),
-                          "last_entry_date": row.get("last_entry_date", "")
-                      }
-                      final_report.append(report_row)
+                  # Add missing columns if not present
+                  required_cols = ["project", "user_name", "user_email", "total_duration_raw", "total_hours", "total_entries", "first_entry_date", "last_entry_date"]
+                  for col in required_cols:
+                      if col not in grouped.columns:
+                          grouped[col] = "" if col in ["user_email", "first_entry_date", "last_entry_date"] else 0
                   
-                  # Convert to DataFrame and save
-                  if final_report:
-                      report_df = pd.DataFrame(final_report)
-                      report_df.to_csv("exports/project_time_report.csv", index=False)
-                      print(f"✅ Created project time report with {len(report_df)} rows")
-                      results["project_time_report"] = len([row for row in final_report if row["project_name"] != "--- SEPARATOR ---"])
-                  else:
-                      print("❌ No data for project time report")
-                      results["project_time_report"] = 0
+                  # Sort data: Department of Health first (by total_hours desc), then separator, then Coerco (by total_hours desc)
+                  dept_health = grouped[grouped["project"] == "Department of Health (Government of Western Australia)"].copy()
+                  coerco = grouped[grouped["project"] == "Coerco"].copy()
+                  
+                  # Sort each project group by total_hours descending
+                  dept_health = dept_health.sort_values("total_hours", ascending=False)
+                  coerco = coerco.sort_values("total_hours", ascending=False)
+                  
+                  # Create final report with separator
+                  final_rows = []
+                  
+                  # Add Department of Health data
+                  for _, row in dept_health.iterrows():
+                      final_rows.append(row.to_dict())
+                  
+                  # Add separator row
+                  separator_row = {
+                      "project": "--- SEPARATOR ---",
+                      "user_name": "",
+                      "user_email": "",
+                      "total_duration_raw": None,
+                      "total_hours": None,
+                      "total_entries": None,
+                      "first_entry_date": None,
+                      "last_entry_date": None
+                  }
+                  final_rows.append(separator_row)
+                  
+                  # Add Coerco data
+                  for _, row in coerco.iterrows():
+                      final_rows.append(row.to_dict())
+                  
+                  # Create final DataFrame
+                  final_df = pd.DataFrame(final_rows)
+                  
+                  # Ensure column order matches the expected format
+                  column_order = ["project", "user_name", "user_email", "total_duration_raw", "total_hours", "total_entries", "first_entry_date", "last_entry_date"]
+                  final_df = final_df[column_order]
+                  
+                  # Save to CSV
+                  final_df.to_csv("exports/project_time_report.csv", index=False)
+                  print(f"✅ Created project time report with {len(final_df)} rows")
+                  
+                  # Create summary
+                  summary = {
+                      "export_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                      "total_rows": len(final_df),
+                      "dept_health_users": len(dept_health),
+                      "coerco_users": len(coerco)
+                  }
+                  
+                  with open("exports/export_summary.json", "w") as f:
+                      json.dump(summary, f, indent=2)
+                  
+                  return True
                       
               except Exception as e:
                   print(f"❌ Error creating project time report: {str(e)}")
                   import traceback
                   traceback.print_exc()
-                  results["project_time_report"] = 0
+                  return False
           
           # Generate the project time report
-          create_project_time_report()
+          success = create_project_time_report()
           
-          # Check if we have any successful exports
-          successful_exports = sum(1 for count in results.values() if count > 0)
-          if successful_exports == 0:
-              print("⚠️ Warning: No data was successfully exported from any table")
+          if not success:
+              print("⚠️ Warning: Could not create project time report")
               print("Please check your Supabase configuration and table access permissions")
               
               # Create a placeholder file
@@ -522,12 +396,12 @@ jobs:
           1. Table names might be different
           2. API key permissions
           3. Row Level Security (RLS) policies
-          4. Tables in non-public schema
+          4. Target projects not found
           
           Please check your Supabase configuration.
           """)
           else:
-              print(f"✅ Successfully exported data from {successful_exports} tables")
+              print("✅ Successfully created project time report")
           '
 
       - name: Check for exported files
@@ -546,7 +420,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: supabase-exports
+          name: supabase-project-time-export
           path: exports/
           retention-days: 30
 
@@ -555,7 +429,7 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add exports/
-          git diff --staged --quiet || git commit -m "Update exported data - $(date)"
+          git diff --staged --quiet || git commit -m "Update project time export - $(date)"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
