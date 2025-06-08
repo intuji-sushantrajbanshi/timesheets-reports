@@ -325,6 +325,8 @@ jobs:
               
               if table_name == "time_entries":
                   display_name += " (Last 30 Days)"
+              elif table_name == "project_time_report":
+                  display_name = "📊 Project Time Report (Consolidated)"
                   
               download_link = f"""
                       <tr>
@@ -348,6 +350,7 @@ jobs:
                   
                   <h2>Export Summary</h2>
                   <p>Time period for time entries: {thirty_days_ago} to {current_date}</p>
+                  <p><strong>📊 Project Time Report:</strong> Consolidated time tracking data organized by project names with user details, total hours, and entry counts.</p>
                   <p><a href="export_summary.json">View detailed export summary (JSON)</a></p>
               </div>
           </body>
@@ -355,6 +358,232 @@ jobs:
           
           with open("exports/index.html", "w") as f:
               f.write(html_content)
+          
+          # Create consolidated project time report
+          def create_project_time_report():
+              """Create a consolidated CSV report with time data arranged by project names"""
+              try:
+                  # First, get all projects
+                  projects_df = pd.DataFrame()
+                  if "projects" in tables:
+                      projects_df = fetch_data(tables["projects"], {"deletedAt": "is.null"})
+                  
+                  # Get users data
+                  users_df = pd.DataFrame()
+                  if "users" in tables:
+                      users_df = fetch_data(tables["users"], {"deletedAt": "is.null"})
+                      # Remove sensitive fields from users
+                      sensitive_fields = ["password", "password_hash", "encrypted_password", "auth_token", "api_key", "remember_token"]
+                      for field in sensitive_fields:
+                          if field in users_df.columns:
+                              users_df = users_df.drop(columns=[field])
+                  
+                  # Get time entries data (try different possible table names)
+                  time_entries_df = pd.DataFrame()
+                  time_table_used = None
+                  
+                  # Try different time entry table names
+                  for time_table_key in ["time_entries", "timesheet_entries", "timesheets"]:
+                      if time_table_key in tables:
+                          temp_df = fetch_data(tables[time_table_key], {"deletedAt": "is.null"})
+                          if not temp_df.empty:
+                              time_entries_df = temp_df
+                              time_table_used = time_table_key
+                              print(f"✅ Using time data from: {tables[time_table_key]}")
+                              break
+                  
+                  if projects_df.empty or users_df.empty or time_entries_df.empty:
+                      print("❌ Missing required data for project time report")
+                      print(f"Projects: {len(projects_df)}, Users: {len(users_df)}, Time entries: {len(time_entries_df)}")
+                      return
+                  
+                  # Print column names for debugging
+                  print(f"📋 Projects columns: {list(projects_df.columns)}")
+                  print(f"📋 Users columns: {list(users_df.columns)}")
+                  print(f"📋 Time entries columns: {list(time_entries_df.columns)}")
+                  
+                  # Try to identify the correct column names (case-insensitive matching)
+                  def find_column(df, possible_names):
+                      """Find column name from list of possibilities (case-insensitive)"""
+                      df_columns = [col.lower() for col in df.columns]
+                      for name in possible_names:
+                          if name.lower() in df_columns:
+                              # Return the actual column name with correct case
+                              return df.columns[df_columns.index(name.lower())]
+                      return None
+                  
+                  # Map column names
+                  project_id_col = find_column(projects_df, ["id", "project_id", "projectId"])
+                  project_name_col = find_column(projects_df, ["title", "name", "project_name", "projectName"])
+                  
+                  user_id_col = find_column(users_df, ["id", "user_id", "userId"])
+                  user_first_name_col = find_column(users_df, ["firstName", "first_name", "fname"])
+                  user_last_name_col = find_column(users_df, ["lastName", "last_name", "lname"])
+                  user_email_col = find_column(users_df, ["email", "email_address"])
+                  
+                  time_project_id_col = find_column(time_entries_df, ["projectId", "project_id", "project"])
+                  time_user_id_col = find_column(time_entries_df, ["userId", "user_id", "user"])
+                  time_duration_col = find_column(time_entries_df, ["duration", "hours", "time_spent", "total_time"])
+                  time_start_col = find_column(time_entries_df, ["startTime", "start_time", "started_at", "start"])
+                  time_end_col = find_column(time_entries_df, ["endTime", "end_time", "ended_at", "end"])
+                  time_date_col = find_column(time_entries_df, ["entryDate", "entry_date", "date", "created_at"])
+                  
+                  print(f"🔍 Column mapping:")
+                  print(f"   Project: id={project_id_col}, name={project_name_col}")
+                  print(f"   User: id={user_id_col}, first={user_first_name_col}, last={user_last_name_col}, email={user_email_col}")
+                  print(f"   Time: project_id={time_project_id_col}, user_id={time_user_id_col}, duration={time_duration_col}")
+                  
+                  # Check if we have the essential columns
+                  if not all([project_id_col, project_name_col, user_id_col, time_project_id_col, time_user_id_col]):
+                      print("❌ Cannot find essential columns for project time report")
+                      return
+                  
+                  # Merge the data
+                  # First merge time entries with projects
+                  merged_df = time_entries_df.merge(
+                      projects_df[[project_id_col, project_name_col]], 
+                      left_on=time_project_id_col, 
+                      right_on=project_id_col, 
+                      how="inner"
+                  )
+                  
+                  # Then merge with users
+                  user_cols_to_merge = [user_id_col]
+                  if user_first_name_col: user_cols_to_merge.append(user_first_name_col)
+                  if user_last_name_col: user_cols_to_merge.append(user_last_name_col)
+                  if user_email_col: user_cols_to_merge.append(user_email_col)
+                  
+                  merged_df = merged_df.merge(
+                      users_df[user_cols_to_merge], 
+                      left_on=time_user_id_col, 
+                      right_on=user_id_col, 
+                      how="inner"
+                  )
+                  
+                  if merged_df.empty:
+                      print("❌ No data after merging tables")
+                      return
+                  
+                  print(f"✅ Successfully merged data: {len(merged_df)} time entries")
+                  
+                  # Create user name column
+                  if user_first_name_col and user_last_name_col:
+                      merged_df["user_name"] = merged_df[user_first_name_col].fillna("") + " " + merged_df[user_last_name_col].fillna("")
+                      merged_df["user_name"] = merged_df["user_name"].str.strip()
+                  else:
+                      merged_df["user_name"] = merged_df[user_email_col] if user_email_col else "Unknown User"
+                  
+                  # Calculate duration (try multiple approaches)
+                  merged_df["calculated_duration"] = 0
+                  
+                  # Method 1: Use existing duration column (convert to minutes if needed)
+                  if time_duration_col and time_duration_col in merged_df.columns:
+                      duration_values = pd.to_numeric(merged_df[time_duration_col], errors="coerce").fillna(0)
+                      # If values are very large, they might be in milliseconds or seconds
+                      if duration_values.max() > 1440:  # More than 24 hours in minutes
+                          if duration_values.max() > 86400:  # More than 24 hours in seconds
+                              duration_values = duration_values / 60  # Convert seconds to minutes
+                          else:
+                              duration_values = duration_values  # Already in minutes
+                      merged_df["calculated_duration"] = duration_values
+                  
+                  # Method 2: Calculate from start/end times
+                  elif time_start_col and time_end_col:
+                      try:
+                          merged_df[time_start_col] = pd.to_datetime(merged_df[time_start_col], errors="coerce")
+                          merged_df[time_end_col] = pd.to_datetime(merged_df[time_end_col], errors="coerce")
+                          time_diff = (merged_df[time_end_col] - merged_df[time_start_col]).dt.total_seconds() / 60
+                          merged_df["calculated_duration"] = time_diff.fillna(0)
+                      except Exception as e:
+                          print(f"⚠️ Could not calculate duration from start/end times: {e}")
+                  
+                  # Group by project and user
+                  grouped = merged_df.groupby([project_name_col, "user_name", user_email_col if user_email_col else "user_name"]).agg({
+                      "calculated_duration": ["sum", "count"],
+                      time_date_col: ["min", "max"] if time_date_col else ["count", "count"]
+                  }).reset_index()
+                  
+                  # Flatten column names
+                  grouped.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in grouped.columns]
+                  
+                  # Rename columns for clarity
+                  column_renames = {}
+                  for col in grouped.columns:
+                      if "calculated_duration_sum" in col:
+                          column_renames[col] = "total_duration_minutes"
+                      elif "calculated_duration_count" in col:
+                          column_renames[col] = "total_entries"
+                      elif time_date_col and f"{time_date_col}_min" in col:
+                          column_renames[col] = "first_entry_date"
+                      elif time_date_col and f"{time_date_col}_max" in col:
+                          column_renames[col] = "last_entry_date"
+                  
+                  grouped = grouped.rename(columns=column_renames)
+                  
+                  # Calculate hours
+                  if "total_duration_minutes" in grouped.columns:
+                      grouped["total_hours"] = (grouped["total_duration_minutes"] / 60).round(2)
+                  else:
+                      grouped["total_hours"] = 0
+                  
+                  # Rename project column
+                  project_col_name = [col for col in grouped.columns if project_name_col in col][0]
+                  grouped = grouped.rename(columns={project_col_name: "project_name"})
+                  
+                  # Sort by project name and total hours (descending)
+                  grouped = grouped.sort_values(["project_name", "total_hours"], ascending=[True, False])
+                  
+                  # Create final report with separators between projects
+                  final_report = []
+                  current_project = None
+                  
+                  for _, row in grouped.iterrows():
+                      # Add separator when project changes
+                      if current_project != row["project_name"]:
+                          if current_project is not None:  # Not the first project
+                              final_report.append({
+                                  "project_name": "--- SEPARATOR ---",
+                                  "user_name": "",
+                                  "user_email": "",
+                                  "total_duration_minutes": None,
+                                  "total_hours": None,
+                                  "total_entries": None,
+                                  "first_entry_date": None,
+                                  "last_entry_date": None
+                              })
+                          current_project = row["project_name"]
+                      
+                      # Add the actual data row
+                      report_row = {
+                          "project_name": row["project_name"],
+                          "user_name": row["user_name"],
+                          "user_email": row.get(user_email_col + "_", row["user_name"]) if user_email_col else row["user_name"],
+                          "total_duration_minutes": row.get("total_duration_minutes", 0),
+                          "total_hours": row.get("total_hours", 0),
+                          "total_entries": row.get("total_entries", 0),
+                          "first_entry_date": row.get("first_entry_date", ""),
+                          "last_entry_date": row.get("last_entry_date", "")
+                      }
+                      final_report.append(report_row)
+                  
+                  # Convert to DataFrame and save
+                  if final_report:
+                      report_df = pd.DataFrame(final_report)
+                      report_df.to_csv("exports/project_time_report.csv", index=False)
+                      print(f"✅ Created project time report with {len(report_df)} rows")
+                      results["project_time_report"] = len([row for row in final_report if row["project_name"] != "--- SEPARATOR ---"])
+                  else:
+                      print("❌ No data for project time report")
+                      results["project_time_report"] = 0
+                      
+              except Exception as e:
+                  print(f"❌ Error creating project time report: {str(e)}")
+                  import traceback
+                  traceback.print_exc()
+                  results["project_time_report"] = 0
+          
+          # Generate the project time report
+          create_project_time_report()
           
           # Check if we have any successful exports
           successful_exports = sum(1 for count in results.values() if count > 0)
