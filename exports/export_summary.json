@@ -1,0 +1,17 @@
+{
+  "export_date": "2025-06-08 15:55:47",
+  "tables_exported": {
+    "companies": 1,
+    "projects": 1,
+    "users": 12,
+    "activity_types": 4,
+    "focus_areas": 6,
+    "timesheets": 1,
+    "timesheet_entries": 0,
+    "time_entries": 0,
+    "clients": 1,
+    "teams": 2,
+    "departments": 3
+  },
+  "time_entries_period": "2025-05-09 to 2025-06-08"
+}

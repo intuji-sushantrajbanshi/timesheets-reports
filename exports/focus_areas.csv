@@ -1,0 +1,7 @@
+id,companyId,activityTypeId,name,colourCode,description,isBillable,isActive,createdAt,updatedAt,deletedAt
+02a17e01-74a2-43f7-bcae-1110beade071,096e28e4-d4e7-455f-a60e-6b9600cec7a8,24bb88d5-7daf-418b-b63c-5f367df356a9,Sales/Business Development,,,False,True,2025-05-21T08:53:19,2025-05-21T08:53:20,
+f55ccaf3-39c1-4309-b24a-7f61159c7c83,096e28e4-d4e7-455f-a60e-6b9600cec7a8,c79a78ed-451f-4229-9361-c2debcc22873,Design,,,False,True,2025-05-21T04:32:58,2025-05-21T04:32:58,
+564b13e4-88af-46ee-87e1-d95e49c03e14,096e28e4-d4e7-455f-a60e-6b9600cec7a8,c79a78ed-451f-4229-9361-c2debcc22873,Development,,,False,True,2025-05-21T04:33:40,2025-05-21T04:33:40,
+09a7c669-fdc4-45ef-8c89-c3da1ed546f9,096e28e4-d4e7-455f-a60e-6b9600cec7a8,7396fffa-0ae9-46c6-88bd-bed280f8368e,Lunch / Tea Break,,,False,True,2025-05-21T04:34:11,2025-05-21T04:34:11,
+35af99df-57fa-41eb-b4a9-45a0f2aab3fd,096e28e4-d4e7-455f-a60e-6b9600cec7a8,7396fffa-0ae9-46c6-88bd-bed280f8368e,Out of Office,,,False,True,2025-05-21T04:34:33,2025-05-21T04:34:33,
+4250f3a5-8611-456d-a4d5-39770099ed13,096e28e4-d4e7-455f-a60e-6b9600cec7a8,1a5556a2-8ca9-4fb4-8277-4066151dd60a,Sick Leave,,,False,True,2025-05-21T04:35:50,2025-05-21T04:35:50,

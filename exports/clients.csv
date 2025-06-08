@@ -1,0 +1,2 @@
+id,companyId,managerId,name,code,industry,website,description,status,createdAt,updatedAt,deletedAt
+01973f98-4d96-70df-ad04-d760f65ab64f,096e28e4-d4e7-455f-a60e-6b9600cec7a8,e0a89a88-6291-46b3-ad7a-5506a8acca40,Test Client,,,,,ACTIVE,2025-06-05T10:17:15,2025-06-05T10:17:15,

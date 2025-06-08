@@ -1,0 +1,2 @@
+id,companyId,userId,approverId,description,duration,status,entryDate,submittedAt,approvedAt,createdAt,updatedAt,deletedAt,isAllDay,timezone
+bfe7a6d5-8fb3-4d17-a707-f2327e4b0a6e,096e28e4-d4e7-455f-a60e-6b9600cec7a8,2328b797-a73a-421d-9bb4-e125e8d8b25d,,,20,PENDING,2025-06-05,,,2025-06-05T13:59:45,2025-06-05T13:59:33,,False,Asia/Kathmandu

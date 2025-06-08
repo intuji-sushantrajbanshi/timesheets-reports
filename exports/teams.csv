@@ -1,0 +1,3 @@
+id,companyId,departmentId,leadId,name,code,isActive,createdAt,updatedAt,deletedAt
+0196f64c-7516-72db-a4ff-f0dedf9845d8,096e28e4-d4e7-455f-a60e-6b9600cec7a8,0196f64a-aaee-7219-bdb1-697fe070ee05,0196f641-d4e4-732a-a9ec-04f80d1bf8d4,Backend,B1,True,2025-05-22T04:42:08,2025-05-22T04:42:08,
+0196f6ae-1b19-70ca-9eb8-416509ba1633,096e28e4-d4e7-455f-a60e-6b9600cec7a8,0196f6ad-5581-70d4-b4ee-59d9c0d20bb8,056c65d0-a32d-4b5a-9a77-5023d9e3db19,Sales Team,S1,True,2025-05-22T06:28:47,2025-05-22T06:28:47,

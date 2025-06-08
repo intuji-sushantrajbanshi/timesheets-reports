@@ -1,0 +1,4 @@
+id,companyId,managerId,name,code,description,isActive,createdAt,updatedAt,deletedAt
+0196f646-b04f-70c1-8483-91f65b6f0ba8,096e28e4-d4e7-455f-a60e-6b9600cec7a8,bd31de19-72fc-4337-a575-52695ee47891,Frontend,FE,,True,2025-05-22T04:35:49,2025-05-22T04:35:49,
+0196f64a-aaee-7219-bdb1-697fe070ee05,096e28e4-d4e7-455f-a60e-6b9600cec7a8,0196f641-d4e4-732a-a9ec-04f80d1bf8d4,Engineerings,E1,,False,2025-05-22T04:40:10,2025-05-22T04:41:34,
+0196f6ad-5581-70d4-b4ee-59d9c0d20bb8,096e28e4-d4e7-455f-a60e-6b9600cec7a8,056c65d0-a32d-4b5a-9a77-5023d9e3db19,Sales,S12,,True,2025-05-22T06:27:56,2025-05-22T06:27:56,

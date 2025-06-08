@@ -1,0 +1,2 @@
+id,companyId,clientId,name,description,budgetHours,budgetAmount,billableRate,isBillable,status,startDate,endDate,createdAt,updatedAt,deletedAt,code
+01973f98-c9d6-73d0-8085-1127b18189d9,096e28e4-d4e7-455f-a60e-6b9600cec7a8,01973f98-4d96-70df-ad04-d760f65ab64f,Test Client Test Projects,asdfasdf,0.0,0.0,0.0,False,ACTIVE,,,2025-06-05T10:17:47,2025-06-05T10:17:47,,

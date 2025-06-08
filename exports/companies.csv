@@ -1,0 +1,2 @@
+id,name,email,phone,website,country,countryCode,state,city,suburb,addressLine1,addressLine2,postcode,status,dateFormat,timeFormat,createdAt,updatedAt,deletedAt
+096e28e4-d4e7-455f-a60e-6b9600cec7a8,Intuji,support@intuji.com,+612208994262,https://intuji.com,Nepal,NP,,Kathmandu,,,,,ACTIVE,MM_DD_YYYY,HOUR_12,2025-05-16T18:53:05,2025-05-16T18:53:05,

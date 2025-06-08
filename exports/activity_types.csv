@@ -1,0 +1,5 @@
+id,name,description,isBillable,isActive,createdAt,updatedAt,deletedAt,displayOrder
+24bb88d5-7daf-418b-b63c-5f367df356a9,Internal,,False,True,2025-05-19T10:40:23,2025-05-19T10:40:24,,0
+7396fffa-0ae9-46c6-88bd-bed280f8368e,Break,,False,True,2025-05-21T04:26:15,2025-05-21T04:26:15,,0
+1a5556a2-8ca9-4fb4-8277-4066151dd60a,Leave,,False,True,2025-05-21T04:26:36,2025-05-21T04:26:36,,0
+c79a78ed-451f-4229-9361-c2debcc22873,External,,True,True,2025-05-21T04:25:38,2025-05-21T04:25:38,,0
