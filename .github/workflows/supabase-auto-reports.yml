@@ -11,13 +11,10 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 jobs:
   export-data:
     runs-on: ubuntu-latest
-    # Remove environment block to avoid protection rules
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -283,82 +280,6 @@ jobs:
               }
               json.dump(summary, f, indent=2)
           
-          # Get current timestamp for HTML
-          timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-          
-          # Create an index.html file for GitHub Pages
-          html_content = f"""<!DOCTYPE html>
-          <html>
-          <head>
-              <title>Supabase Data Exports</title>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1">
-              <style>
-                  body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; line-height: 1.6; }}
-                  h1 {{ color: #333; }}
-                  .container {{ max-width: 800px; margin: 0 auto; }}
-                  table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
-                  th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
-                  th {{ background-color: #f2f2f2; }}
-                  .download-btn {{ display: inline-block; background-color: #4CAF50; color: white; 
-                                  padding: 8px 16px; text-decoration: none; border-radius: 4px; }}
-                  .download-btn:hover {{ background-color: #45a049; }}
-                  .timestamp {{ color: #666; font-style: italic; }}
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <h1>Supabase Data Exports</h1>
-                  <p class="timestamp">Last updated: {timestamp} UTC</p>
-                  
-                  <table>
-                      <tr>
-                          <th>Dataset</th>
-                          <th>Records</th>
-                          <th>Download</th>
-                      </tr>"""
-          
-          # Add table rows dynamically
-          for table_name, count in results.items():
-              file_name = f"{table_name}.csv"
-              display_name = table_name.replace("_", " ").title()
-              
-              if table_name == "time_entries":
-                  display_name += " (Last 30 Days)"
-              elif table_name == "project_time_report":
-                  display_name = "📊 Project Time Report (Consolidated)"
-                  
-              download_link = f"""
-                      <tr>
-                          <td>{display_name}</td>
-                          <td>{count}</td>
-                          <td>"""
-              
-              if count > 0:
-                  download_link += f"""<a href="{file_name}" class="download-btn">Download CSV</a>"""
-              else:
-                  download_link += """<span style="color: #999;">No data</span>"""
-                  
-              download_link += """</td>
-                      </tr>"""
-              
-              html_content += download_link
-          
-          # Complete the HTML
-          html_content += f"""
-                  </table>
-                  
-                  <h2>Export Summary</h2>
-                  <p>Time period for time entries: {thirty_days_ago} to {current_date}</p>
-                  <p><strong>📊 Project Time Report:</strong> Consolidated time tracking data organized by project names with user details, total hours, and entry counts.</p>
-                  <p><a href="export_summary.json">View detailed export summary (JSON)</a></p>
-              </div>
-          </body>
-          </html>"""
-          
-          with open("exports/index.html", "w") as f:
-              f.write(html_content)
-          
           # Create consolidated project time report
           def create_project_time_report():
               """Create a consolidated CSV report with time data arranged by project names"""
@@ -595,7 +516,7 @@ jobs:
               with open("exports/README.md", "w") as f:
                   f.write(f"""# Supabase Export Attempt
           
-          No data could be exported on {timestamp}.
+          No data could be exported on {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}.
           
           Possible reasons:
           1. Table names might be different
@@ -628,22 +549,6 @@ jobs:
           name: supabase-exports
           path: exports/
           retention-days: 30
-
-      # Only deploy to GitHub Pages if we're on main/master branch and files exist
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'schedule'
-
-      - name: Upload to GitHub Pages
-        uses: actions/upload-pages-artifact@v3
-        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'schedule'
-        with:
-          path: './exports'
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'schedule'
 
       - name: Commit and push changes
         run: |
