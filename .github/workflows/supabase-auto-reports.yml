@@ -50,6 +50,7 @@ jobs:
           import os
           import requests
           import json
+          import re
           
           supabase_url = os.environ["SUPABASE_URL"]
           supabase_key = os.environ["SUPABASE_KEY"]
@@ -60,38 +61,70 @@ jobs:
               "Content-Type": "application/json"
           }
           
-          # Try to get schema information
-          try:
-              print("🔍 Attempting to discover available tables...")
-              
-              # Try to list tables using the system catalog
-              response = requests.get(
-                  f"{supabase_url}/rest/v1/",
-                  headers=headers
-              )
-              
-              print(f"API root response: {response.status_code}")
-              if response.status_code == 200:
-                  print(f"Available endpoints: {response.text}")
-              
-              # Try a few common table names to see if any exist
-              test_tables = ["companies", "users", "projects", "time_entries", 
-                            "company", "user", "project", "timeentry",
-                            "Companies", "Users", "Projects", "TimeEntries"]
-              
-              for table in test_tables:
-                  test_response = requests.get(
-                      f"{supabase_url}/rest/v1/{table}?limit=1",
-                      headers=headers
-                  )
-                  
-                  if test_response.status_code == 200:
-                      print(f"✅ Found table: {table}")
-                  else:
-                      print(f"❌ Table not found: {table} (Status: {test_response.status_code})")
+          print("🔍 Discovering available tables...")
           
+          # Get the OpenAPI spec which contains all available endpoints
+          try:
+              response = requests.get(f"{supabase_url}/rest/v1/", headers=headers)
+              
+              if response.status_code == 200:
+                  spec = response.json()
+                  
+                  # Extract table names from the paths
+                  tables = []
+                  if "paths" in spec:
+                      for path in spec["paths"].keys():
+                          # Remove leading slash and extract table name
+                          if path.startswith("/") and len(path) > 1:
+                              table_name = path[1:]  # Remove leading slash
+                              # Skip paths with parameters or special endpoints
+                              if not any(char in table_name for char in ["?", "{", "}", "rpc/"]):
+                                  tables.append(table_name)
+                  
+                  print(f"📋 Found {len(tables)} tables:")
+                  for table in sorted(tables):
+                      print(f"  - {table}")
+                  
+                  # Test access to each table
+                  print("\n🔍 Testing table access:")
+                  accessible_tables = []
+                  
+                  for table in tables:
+                      try:
+                          test_response = requests.get(
+                              f"{supabase_url}/rest/v1/{table}?limit=1",
+                              headers=headers
+                          )
+                          
+                          if test_response.status_code == 200:
+                              data = test_response.json()
+                              row_count = len(data)
+                              print(f"  ✅ {table} - accessible ({row_count} sample row{'s' if row_count != 1 else ''})")
+                              accessible_tables.append(table)
+                          elif test_response.status_code == 401:
+                              print(f"  🔒 {table} - authentication required")
+                          elif test_response.status_code == 403:
+                              print(f"  🚫 {table} - access forbidden (check RLS policies)")
+                          else:
+                              print(f"  ❌ {table} - error: {test_response.status_code}")
+                              
+                      except Exception as e:
+                          print(f"  ❌ {table} - error: {str(e)}")
+                  
+                  print(f"\n✅ {len(accessible_tables)} tables are accessible:")
+                  for table in accessible_tables:
+                      print(f"  - {table}")
+                      
+                  # Save accessible tables to a file for the next step
+                  with open("accessible_tables.txt", "w") as f:
+                      for table in accessible_tables:
+                          f.write(f"{table}\n")
+                          
+              else:
+                  print(f"❌ Failed to get OpenAPI spec: {response.status_code}")
+                  
           except Exception as e:
-              print(f"❌ Error during table discovery: {str(e)}")
+              print(f"❌ Error during discovery: {str(e)}")
           '
 
       - name: Export data from Supabase
@@ -129,13 +162,13 @@ jobs:
                   params.update(query_params)
                   
               try:
-                  print(f"🔍 Fetching from {endpoint} with params {params}")
+                  print(f"🔍 Fetching from {table_name} with params {params}")
                   response = requests.get(endpoint, headers=headers, params=params)
                   
                   if response.status_code == 200:
                       data = response.json()
                       if not data:
-                          print(f"No data returned for {table_name}")
+                          print(f"📭 No data returned for {table_name}")
                           return pd.DataFrame()
                           
                       df = pd.DataFrame(data)
@@ -149,75 +182,106 @@ jobs:
                   print(f"❌ Error fetching {table_name}: {str(e)}")
                   return pd.DataFrame()
           
+          # Read accessible tables from discovery step
+          accessible_tables = []
+          try:
+              with open("accessible_tables.txt", "r") as f:
+                  accessible_tables = [line.strip() for line in f.readlines() if line.strip()]
+              print(f"📋 Found {len(accessible_tables)} accessible tables: {accessible_tables}")
+          except FileNotFoundError:
+              print("⚠️ accessible_tables.txt not found, using fallback table names")
+              accessible_tables = ["companies", "users", "projects"]  # fallback based on discovery results
+          
           # Calculate date for filtering time entries (last 30 days)
           thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
           current_date = datetime.now().strftime("%Y-%m-%d")
           
-          # Correct table names based on your schema (PascalCase)
-          tables = {
-              "companies": "Company",
-              "projects": "Project", 
-              "users": "User",
-              "activity_types": "ActivityType",
-              "focus_areas": "FocusArea",
-              "time_entries": "TimeEntry",
-              "submissions": "Submission"
-          }
+          # Map logical names to actual table names found in Supabase
+          table_mapping = {}
           
-          # Export data for each table
+          # Try to match discovered tables to our expected data types
+          for table in accessible_tables:
+              table_lower = table.lower()
+              if "compan" in table_lower:
+                  table_mapping["companies"] = table
+              elif "project" in table_lower:
+                  table_mapping["projects"] = table
+              elif "user" in table_lower:
+                  table_mapping["users"] = table
+              elif "activity" in table_lower and "type" in table_lower:
+                  table_mapping["activity_types"] = table
+              elif "focus" in table_lower and "area" in table_lower:
+                  table_mapping["focus_areas"] = table
+              elif "time" in table_lower and ("entr" in table_lower or "entry" in table_lower):
+                  table_mapping["time_entries"] = table
+              elif "submission" in table_lower:
+                  table_mapping["submissions"] = table
+          
+          print(f"🗺️ Table mapping: {table_mapping}")
+          
+          # Export data for each mapped table
           results = {}
           
-          # Export active companies
-          companies = fetch_data(tables["companies"], {"deletedAt": "is.null"})
-          results["companies"] = len(companies) if not companies.empty else 0
-          if not companies.empty:
-              companies.to_csv("exports/companies.csv", index=False)
+          for logical_name, actual_table_name in table_mapping.items():
+              print(f"\n📊 Processing {logical_name} ({actual_table_name})...")
               
-          # Export active projects
-          projects = fetch_data(tables["projects"], {"deletedAt": "is.null"})
-          results["projects"] = len(projects) if not projects.empty else 0
-          if not projects.empty:
-              projects.to_csv("exports/projects.csv", index=False)
-              
-          # Export active users
-          users = fetch_data(tables["users"], {"deletedAt": "is.null"})
-          results["users"] = len(users) if not users.empty else 0
-          if not users.empty:
-              # Remove sensitive fields
-              if "password" in users.columns:
-                  users = users.drop(columns=["password"])
-              users.to_csv("exports/users.csv", index=False)
-              
-          # Export activity types
-          activity_types = fetch_data(tables["activity_types"], {"deletedAt": "is.null"})
-          results["activity_types"] = len(activity_types) if not activity_types.empty else 0
-          if not activity_types.empty:
-              activity_types.to_csv("exports/activity_types.csv", index=False)
-              
-          # Export focus areas
-          focus_areas = fetch_data(tables["focus_areas"], {"deletedAt": "is.null"})
-          results["focus_areas"] = len(focus_areas) if not focus_areas.empty else 0
-          if not focus_areas.empty:
-              focus_areas.to_csv("exports/focus_areas.csv", index=False)
-              
-          # Export time entries from last 30 days
-          time_entries = fetch_data(tables["time_entries"], 
-                                   {"deletedAt": "is.null", 
-                                    "entryDate": f"gte.{thirty_days_ago}"})
-          results["time_entries"] = len(time_entries) if not time_entries.empty else 0
-          if not time_entries.empty:
-              time_entries.to_csv("exports/time_entries.csv", index=False)
-              
-          # Export submissions
-          submissions = fetch_data(tables["submissions"], {"deletedAt": "is.null"})
-          results["submissions"] = len(submissions) if not submissions.empty else 0
-          if not submissions.empty:
-              submissions.to_csv("exports/submissions.csv", index=False)
-              
+              try:
+                  # Different filtering for different table types
+                  if logical_name == "time_entries":
+                      # Time entries with date filtering
+                      df = fetch_data(actual_table_name, 
+                                     {"deletedAt": "is.null", 
+                                      "entryDate": f"gte.{thirty_days_ago}"})
+                  else:
+                      # Other tables with standard filtering
+                      df = fetch_data(actual_table_name, {"deletedAt": "is.null"})
+                  
+                  results[logical_name] = len(df) if not df.empty else 0
+                  
+                  if not df.empty:
+                      # Remove sensitive fields for users
+                      if logical_name == "users" and "password" in df.columns:
+                          df = df.drop(columns=["password"])
+                          print("🔒 Removed password column from users data")
+                      
+                      # Save to CSV
+                      csv_filename = f"exports/{logical_name}.csv"
+                      df.to_csv(csv_filename, index=False)
+                      print(f"💾 Saved {len(df)} rows to {csv_filename}")
+                  else:
+                      print(f"📭 No data found for {logical_name}")
+                      
+              except Exception as e:
+                  print(f"❌ Error processing {logical_name}: {str(e)}")
+                  results[logical_name] = 0
+          
+          # Also export any unmatched tables that might contain useful data
+          unmatched_tables = [t for t in accessible_tables if t not in table_mapping.values()]
+          print(f"\n🔍 Found {len(unmatched_tables)} additional tables: {unmatched_tables}")
+          
+          for table_name in unmatched_tables:
+              try:
+                  print(f"\n📊 Processing additional table: {table_name}")
+                  df = fetch_data(table_name, {"limit": "1000"})  # Limit to prevent huge exports
+                  
+                  if not df.empty:
+                      results[f"additional_{table_name}"] = len(df)
+                      csv_filename = f"exports/additional_{table_name}.csv"
+                      df.to_csv(csv_filename, index=False)
+                      print(f"💾 Saved {len(df)} rows to {csv_filename}")
+                  else:
+                      results[f"additional_{table_name}"] = 0
+                      
+              except Exception as e:
+                  print(f"❌ Error processing additional table {table_name}: {str(e)}")
+                  results[f"additional_{table_name}"] = 0
+          
           # Create a summary file with export information
           with open("exports/export_summary.json", "w") as f:
               summary = {
                   "export_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                  "accessible_tables": accessible_tables,
+                  "table_mapping": table_mapping,
                   "tables_exported": results,
                   "time_entries_period": f"{thirty_days_ago} to {current_date}"
               }
@@ -244,6 +308,7 @@ jobs:
                                   padding: 8px 16px; text-decoration: none; border-radius: 4px; }}
                   .download-btn:hover {{ background-color: #45a049; }}
                   .timestamp {{ color: #666; font-style: italic; }}
+                  .section {{ margin: 30px 0; }}
               </style>
           </head>
           <body>
@@ -251,44 +316,89 @@ jobs:
                   <h1>Supabase Data Exports</h1>
                   <p class="timestamp">Last updated: {timestamp} UTC</p>
                   
-                  <table>
-                      <tr>
-                          <th>Dataset</th>
-                          <th>Records</th>
-                          <th>Download</th>
-                      </tr>"""
+                  <div class="section">
+                      <h2>Main Data Tables</h2>
+                      <table>
+                          <tr>
+                              <th>Dataset</th>
+                              <th>Records</th>
+                              <th>Download</th>
+                          </tr>"""
           
-          # Add table rows dynamically based on what was successfully exported
-          for table_name, count in results.items():
-              file_name = f"{table_name}.csv"
-              display_name = table_name.replace("_", " ").title()
-              
-              if table_name == "time_entries":
-                  display_name += " (Last 30 Days)"
+          # Add main table rows
+          main_tables = ["companies", "projects", "users", "activity_types", "focus_areas", "time_entries", "submissions"]
+          for table_name in main_tables:
+              if table_name in results:
+                  count = results[table_name]
+                  file_name = f"{table_name}.csv"
+                  display_name = table_name.replace("_", " ").title()
                   
-              download_link = f"""
-                      <tr>
-                          <td>{display_name}</td>
-                          <td>{count}</td>
-                          <td>"""
-              
-              if count > 0:
-                  download_link += f"""<a href="{file_name}" class="download-btn">Download CSV</a>"""
-              else:
-                  download_link += """<span style="color: #999;">No data</span>"""
+                  if table_name == "time_entries":
+                      display_name += " (Last 30 Days)"
+                      
+                  html_content += f"""
+                          <tr>
+                              <td>{display_name}</td>
+                              <td>{count}</td>
+                              <td>"""
                   
-              download_link += """</td>
-                      </tr>"""
+                  if count > 0:
+                      html_content += f"""<a href="{file_name}" class="download-btn">Download CSV</a>"""
+                  else:
+                      html_content += """<span style="color: #999;">No data</span>"""
+                      
+                  html_content += """</td>
+                          </tr>"""
+          
+          html_content += """
+                      </table>
+                  </div>"""
+          
+          # Add additional tables if any
+          additional_tables = [k for k in results.keys() if k.startswith("additional_")]
+          if additional_tables:
+              html_content += """
+                  <div class="section">
+                      <h2>Additional Tables</h2>
+                      <table>
+                          <tr>
+                              <th>Dataset</th>
+                              <th>Records</th>
+                              <th>Download</th>
+                          </tr>"""
               
-              html_content += download_link
+              for table_name in additional_tables:
+                  count = results[table_name]
+                  file_name = f"{table_name}.csv"
+                  display_name = table_name.replace("additional_", "").replace("_", " ").title()
+                  
+                  html_content += f"""
+                          <tr>
+                              <td>{display_name}</td>
+                              <td>{count}</td>
+                              <td>"""
+                  
+                  if count > 0:
+                      html_content += f"""<a href="{file_name}" class="download-btn">Download CSV</a>"""
+                  else:
+                      html_content += """<span style="color: #999;">No data</span>"""
+                      
+                  html_content += """</td>
+                          </tr>"""
+              
+              html_content += """
+                      </table>
+                  </div>"""
           
           # Complete the HTML
           html_content += f"""
-                  </table>
-                  
-                  <h2>Export Summary</h2>
-                  <p>Time period for time entries: {thirty_days_ago} to {current_date}</p>
-                  <p><a href="export_summary.json">View detailed export summary (JSON)</a></p>
+                  <div class="section">
+                      <h2>Export Details</h2>
+                      <p><strong>Time period for time entries:</strong> {thirty_days_ago} to {current_date}</p>
+                      <p><strong>Tables discovered:</strong> {len(accessible_tables)}</p>
+                      <p><strong>Tables exported:</strong> {sum(1 for count in results.values() if count > 0)}</p>
+                      <p><a href="export_summary.json">View detailed export summary (JSON)</a></p>
+                  </div>
               </div>
           </body>
           </html>"""
@@ -296,11 +406,14 @@ jobs:
           with open("exports/index.html", "w") as f:
               f.write(html_content)
           
-          # Check if we have any successful exports
+          # Final summary
           successful_exports = sum(1 for count in results.values() if count > 0)
+          total_records = sum(results.values())
+          
           if successful_exports == 0:
-              print("⚠️ Warning: No data was successfully exported from any table")
+              print("\n⚠️ Warning: No data was successfully exported from any table")
               print("Please check your Supabase configuration and table access permissions")
           else:
-              print(f"✅ Successfully exported data from {successful_exports} tables")
+              print(f"\n✅ Successfully exported {total_records} records from {successful_exports} tables")
+              print("📄 Generated index.html for GitHub Pages")
           '
