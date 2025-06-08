@@ -17,6 +17,7 @@ permissions:
 jobs:
   export-data:
     runs-on: ubuntu-latest
+    # Remove the environment block temporarily or make it conditional
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -402,20 +403,21 @@ jobs:
           path: exports/
           retention-days: 30
 
+      # Only deploy to GitHub Pages if we're on main/master branch and files exist
       - name: Setup Pages
         uses: actions/configure-pages@v4
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'schedule'
 
       - name: Upload to GitHub Pages
         uses: actions/upload-pages-artifact@v3
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'schedule'
         with:
           path: './exports'
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'schedule'
 
       - name: Commit and push changes
         run: |
