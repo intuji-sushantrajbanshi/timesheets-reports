@@ -79,18 +79,22 @@ jobs:
                   params.update(query_params)
                   
               try:
+                  print(f"🔍 Fetching from {endpoint} with params {params}")
                   response = requests.get(endpoint, headers=headers, params=params)
-                  response.raise_for_status()
                   
-                  data = response.json()
-                  if not data:
-                      print(f"No data returned for {table_name}")
+                  if response.status_code == 200:
+                      data = response.json()
+                      if not data:
+                          print(f"No data returned for {table_name}")
+                          return pd.DataFrame()
+                          
+                      df = pd.DataFrame(data)
+                      print(f"✅ Successfully fetched {len(df)} rows from {table_name}")
+                      return df
+                  else:
+                      print(f"❌ Error fetching {table_name}: {response.status_code} - {response.text}")
                       return pd.DataFrame()
                       
-                  df = pd.DataFrame(data)
-                  print(f"✅ Successfully fetched {len(df)} rows from {table_name}")
-                  return df
-                  
               except Exception as e:
                   print(f"❌ Error fetching {table_name}: {str(e)}")
                   return pd.DataFrame()
@@ -99,18 +103,35 @@ jobs:
           thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
           current_date = datetime.now().strftime("%Y-%m-%d")
           
+          # Define tables based on your schema (using exact names from schema)
+          tables = {
+              "companies": "Company",
+              "projects": "Project",
+              "users": "User",
+              "activity_types": "ActivityType",
+              "focus_areas": "FocusArea",
+              "time_entries": "TimeEntry",
+              "submissions": "Submission"
+          }
+          
+          # Export data for each table
+          results = {}
+          
           # Export active companies
-          companies = fetch_data("Company", {"deletedAt": "is.null"})
+          companies = fetch_data(tables["companies"], {"deletedAt": "is.null"})
+          results["companies"] = len(companies) if not companies.empty else 0
           if not companies.empty:
               companies.to_csv("exports/companies.csv", index=False)
               
           # Export active projects
-          projects = fetch_data("Project", {"deletedAt": "is.null"})
+          projects = fetch_data(tables["projects"], {"deletedAt": "is.null"})
+          results["projects"] = len(projects) if not projects.empty else 0
           if not projects.empty:
               projects.to_csv("exports/projects.csv", index=False)
               
           # Export active users
-          users = fetch_data("User", {"deletedAt": "is.null"})
+          users = fetch_data(tables["users"], {"deletedAt": "is.null"})
+          results["users"] = len(users) if not users.empty else 0
           if not users.empty:
               # Remove sensitive fields
               if "password" in users.columns:
@@ -118,24 +139,28 @@ jobs:
               users.to_csv("exports/users.csv", index=False)
               
           # Export activity types
-          activity_types = fetch_data("ActivityType", {"deletedAt": "is.null"})
+          activity_types = fetch_data(tables["activity_types"], {"deletedAt": "is.null"})
+          results["activity_types"] = len(activity_types) if not activity_types.empty else 0
           if not activity_types.empty:
               activity_types.to_csv("exports/activity_types.csv", index=False)
               
           # Export focus areas
-          focus_areas = fetch_data("FocusArea", {"deletedAt": "is.null"})
+          focus_areas = fetch_data(tables["focus_areas"], {"deletedAt": "is.null"})
+          results["focus_areas"] = len(focus_areas) if not focus_areas.empty else 0
           if not focus_areas.empty:
               focus_areas.to_csv("exports/focus_areas.csv", index=False)
               
           # Export time entries from last 30 days
-          time_entries = fetch_data("TimeEntry", 
+          time_entries = fetch_data(tables["time_entries"], 
                                    {"deletedAt": "is.null", 
                                     "entryDate": f"gte.{thirty_days_ago}"})
+          results["time_entries"] = len(time_entries) if not time_entries.empty else 0
           if not time_entries.empty:
               time_entries.to_csv("exports/time_entries.csv", index=False)
               
           # Export submissions
-          submissions = fetch_data("Submission", {"deletedAt": "is.null"})
+          submissions = fetch_data(tables["submissions"], {"deletedAt": "is.null"})
+          results["submissions"] = len(submissions) if not submissions.empty else 0
           if not submissions.empty:
               submissions.to_csv("exports/submissions.csv", index=False)
               
@@ -143,15 +168,7 @@ jobs:
           with open("exports/export_summary.json", "w") as f:
               summary = {
                   "export_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                  "tables_exported": {
-                      "companies": len(companies) if not companies.empty else 0,
-                      "projects": len(projects) if not projects.empty else 0,
-                      "users": len(users) if not users.empty else 0,
-                      "activity_types": len(activity_types) if not activity_types.empty else 0,
-                      "focus_areas": len(focus_areas) if not focus_areas.empty else 0,
-                      "time_entries": len(time_entries) if not time_entries.empty else 0,
-                      "submissions": len(submissions) if not submissions.empty else 0
-                  },
+                  "tables_exported": results,
                   "time_entries_period": f"{thirty_days_ago} to {current_date}"
               }
               json.dump(summary, f, indent=2)
@@ -189,42 +206,34 @@ jobs:
                           <th>Dataset</th>
                           <th>Records</th>
                           <th>Download</th>
-                      </tr>
+                      </tr>"""
+          
+          # Add table rows dynamically based on what was successfully exported
+          for table_name, count in results.items():
+              file_name = f"{table_name}.csv"
+              display_name = table_name.replace("_", " ").title()
+              
+              if table_name == "time_entries":
+                  display_name += " (Last 30 Days)"
+                  
+              download_link = f"""
                       <tr>
-                          <td>Companies</td>
-                          <td>{len(companies) if not companies.empty else 0}</td>
-                          <td><a href="companies.csv" class="download-btn">Download CSV</a></td>
-                      </tr>
-                      <tr>
-                          <td>Projects</td>
-                          <td>{len(projects) if not projects.empty else 0}</td>
-                          <td><a href="projects.csv" class="download-btn">Download CSV</a></td>
-                      </tr>
-                      <tr>
-                          <td>Users</td>
-                          <td>{len(users) if not users.empty else 0}</td>
-                          <td><a href="users.csv" class="download-btn">Download CSV</a></td>
-                      </tr>
-                      <tr>
-                          <td>Activity Types</td>
-                          <td>{len(activity_types) if not activity_types.empty else 0}</td>
-                          <td><a href="activity_types.csv" class="download-btn">Download CSV</a></td>
-                      </tr>
-                      <tr>
-                          <td>Focus Areas</td>
-                          <td>{len(focus_areas) if not focus_areas.empty else 0}</td>
-                          <td><a href="focus_areas.csv" class="download-btn">Download CSV</a></td>
-                      </tr>
-                      <tr>
-                          <td>Time Entries (Last 30 Days)</td>
-                          <td>{len(time_entries) if not time_entries.empty else 0}</td>
-                          <td><a href="time_entries.csv" class="download-btn">Download CSV</a></td>
-                      </tr>
-                      <tr>
-                          <td>Submissions</td>
-                          <td>{len(submissions) if not submissions.empty else 0}</td>
-                          <td><a href="submissions.csv" class="download-btn">Download CSV</a></td>
-                      </tr>
+                          <td>{display_name}</td>
+                          <td>{count}</td>
+                          <td>"""
+              
+              if count > 0:
+                  download_link += f"""<a href="{file_name}" class="download-btn">Download CSV</a>"""
+              else:
+                  download_link += """<span style="color: #999;">No data</span>"""
+                  
+              download_link += """</td>
+                      </tr>"""
+              
+              html_content += download_link
+          
+          # Complete the HTML
+          html_content += f"""
                   </table>
                   
                   <h2>Export Summary</h2>
@@ -237,10 +246,29 @@ jobs:
           with open("exports/index.html", "w") as f:
               f.write(html_content)
           
-          print("✅ Data export completed successfully")
+          # Check if we have any successful exports
+          successful_exports = sum(1 for count in results.values() if count > 0)
+          if successful_exports == 0:
+              print("⚠️ Warning: No data was successfully exported from any table")
+              print("Please check your Supabase configuration and table access permissions")
+          else:
+              print(f"✅ Successfully exported data from {successful_exports} tables")
           '
 
+      - name: Check for exported files
+        id: check_exports
+        run: |
+          if [ -f exports/export_summary.json ]; then
+            echo "Exports summary file exists"
+            cat exports/export_summary.json
+            echo "export_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "No exports were generated"
+            echo "export_exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Upload CSV artifacts
+        if: steps.check_exports.outputs.export_exists == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: supabase-data-exports-${{ github.run_number }}
@@ -248,6 +276,7 @@ jobs:
           retention-days: 30
 
       - name: Deploy to GitHub Pages
+        if: steps.check_exports.outputs.export_exists == 'true'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
