@@ -42,7 +42,7 @@ jobs:
             echo "✅ Supabase credentials found"
           fi
 
-      - name: Export project time data from Supabase
+            - name: Export project time data from Supabase
         run: |
           mkdir -p exports
           python -c '
@@ -101,7 +101,10 @@ jobs:
           
           if company_df.empty or "id" not in company_df.columns:
               print("❌ Company not found")
-              return False
+              # Create error file instead of returning
+              with open("exports/error.txt", "w") as f:
+                  f.write("Company 'Timesheet App (Production)' not found")
+              exit(1)  # Exit with error code instead of return
               
           company_id = company_df.iloc[0]["id"]
           print(f"✅ Company ID: {company_id}")
