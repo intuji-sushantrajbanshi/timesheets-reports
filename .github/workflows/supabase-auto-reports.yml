@@ -42,7 +42,7 @@ jobs:
             echo "✅ Supabase credentials found"
           fi
 
-            - name: Export project time data from Supabase
+      - name: Export project time data from Supabase
         run: |
           mkdir -p exports
           python -c '
