@@ -150,3 +150,174 @@ try:
     
     print(f"✅ Found {len(projects_filtered)} target projects")
     
+    # Merge time entries with filtered projects
+    merged_df = time_entries_df.merge(
+        projects_filtered[[project_id_col, project_title_col]], 
+        left_on=time_project_id_col, 
+        right_on=project_id_col, 
+        how="inner"
+    )
+    
+    # Merge with users
+    user_cols_to_merge = [user_id_col]
+    if user_first_name_col: user_cols_to_merge.append(user_first_name_col)
+    if user_last_name_col: user_cols_to_merge.append(user_last_name_col)
+    if user_email_col: user_cols_to_merge.append(user_email_col)
+    
+    merged_df = merged_df.merge(
+        users_df[user_cols_to_merge], 
+        left_on=time_user_id_col, 
+        right_on=user_id_col, 
+        how="inner"
+    )
+    
+    if merged_df.empty:
+        print("❌ No data after merging tables")
+        with open("exports/error.txt", "w") as f:
+            f.write("No data after merging tables")
+        exit(1)
+    
+    print(f"✅ Successfully merged data: {len(merged_df)} time entries")
+    
+    # Create user name column
+    if user_first_name_col and user_last_name_col:
+        merged_df["user_name"] = (
+            merged_df[user_first_name_col].fillna("").astype(str) + " " + 
+            merged_df[user_last_name_col].fillna("").astype(str)
+        ).str.strip()
+    else:
+        merged_df["user_name"] = merged_df[user_email_col] if user_email_col else "Unknown User"
+    
+    # Calculate duration
+    if time_duration_col and time_duration_col in merged_df.columns:
+        merged_df["duration_minutes"] = pd.to_numeric(merged_df[time_duration_col], errors="coerce").fillna(0)
+    else:
+        # Calculate from start/end times if available
+        start_col = find_column(time_entries_df, ["startTime"])
+        end_col = find_column(time_entries_df, ["endTime"])
+        
+        if start_col and end_col:
+            merged_df["duration_minutes"] = (
+                pd.to_datetime(merged_df[end_col]) - 
+                pd.to_datetime(merged_df[start_col])
+            ).dt.total_seconds() / 60
+        else:
+            merged_df["duration_minutes"] = 0
+            print("⚠️ No duration column found, using 0 for all entries")
+    
+    # Group by project and user
+    group_cols = [project_title_col, "user_name"]
+    if user_email_col:
+        group_cols.append(user_email_col)
+    
+    agg_dict = {
+        "duration_minutes": ["sum", "count"]
+    }
+    
+    if time_entry_date_col:
+        agg_dict[time_entry_date_col] = ["min", "max"]
+    
+    grouped = merged_df.groupby(group_cols).agg(agg_dict).reset_index()
+    
+    # Flatten column names
+    new_columns = []
+    for col in grouped.columns:
+        if isinstance(col, tuple):
+            if col[1]:
+                new_columns.append(f"{col[0]}_{col[1]}")
+            else:
+                new_columns.append(col[0])
+        else:
+            new_columns.append(col)
+    grouped.columns = new_columns
+    
+    # Rename columns to match expected format
+    column_mapping = {
+        project_title_col: "project",
+        "user_name": "user_name",
+        "duration_minutes_sum": "total_duration_raw",
+        "duration_minutes_count": "total_entries"
+    }
+    
+    if user_email_col:
+        column_mapping[user_email_col] = "user_email"
+    
+    if time_entry_date_col:
+        column_mapping[f"{time_entry_date_col}_min"] = "first_entry_date"
+        column_mapping[f"{time_entry_date_col}_max"] = "last_entry_date"
+    
+    grouped = grouped.rename(columns=column_mapping)
+    
+    # Add total_hours column
+    grouped["total_hours"] = grouped["total_duration_raw"]
+    
+    # Add missing columns if not present
+    required_cols = ["project", "user_name", "user_email", "total_duration_raw", "total_hours", "total_entries", "first_entry_date", "last_entry_date"]
+    for col in required_cols:
+        if col not in grouped.columns:
+            grouped[col] = "" if col in ["user_email", "first_entry_date", "last_entry_date"] else 0
+    
+    # Sort data: Department of Health first (by total_hours desc), then separator, then Coerco (by total_hours desc)
+    dept_health = grouped[grouped["project"] == "Department of Health (Government of Western Australia)"].copy()
+    coerco = grouped[grouped["project"] == "Coerco"].copy()
+    
+    # Sort each project group by total_hours descending
+    dept_health = dept_health.sort_values("total_hours", ascending=False)
+    coerco = coerco.sort_values("total_hours", ascending=False)
+    
+    # Create final report with separator
+    final_rows = []
+    
+    # Add Department of Health data
+    for _, row in dept_health.iterrows():
+        final_rows.append(row.to_dict())
+    
+    # Add separator row
+    separator_row = {
+        "project": "--- SEPARATOR ---",
+        "user_name": "",
+        "user_email": "",
+        "total_duration_raw": None,
+        "total_hours": None,
+        "total_entries": None,
+        "first_entry_date": None,
+        "last_entry_date": None
+    }
+    final_rows.append(separator_row)
+    
+    # Add Coerco data
+    for _, row in coerco.iterrows():
+        final_rows.append(row.to_dict())
+    
+    # Create final DataFrame
+    final_df = pd.DataFrame(final_rows)
+    
+    # Ensure column order matches the expected format
+    column_order = ["project", "user_name", "user_email", "total_duration_raw", "total_hours", "total_entries", "first_entry_date", "last_entry_date"]
+    final_df = final_df[column_order]
+    
+    # Save to CSV
+    final_df.to_csv("exports/project_time_report.csv", index=False)
+    print(f"✅ Created project time report with {len(final_df)} rows")
+    
+    # Create summary
+    summary = {
+        "export_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "company_id": company_id,
+        "total_rows": len(final_df),
+        "dept_health_users": len(dept_health),
+        "coerco_users": len(coerco)
+    }
+    
+    with open("exports/export_summary.json", "w") as f:
+        json.dump(summary, f, indent=2)
+    
+    exit(0)
+        
+except Exception as e:
+    print(f"❌ Error creating project time report: {str(e)}")
+    import traceback
+    traceback.print_exc()
+    with open("exports/error.txt", "w") as f:
+        f.write(f"Error: {str(e)}\n\n{traceback.format_exc()}")
+    exit(1)
