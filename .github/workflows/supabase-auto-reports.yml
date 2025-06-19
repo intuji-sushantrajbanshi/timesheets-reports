@@ -38,6 +38,7 @@ jobs:
     env:
       # Use direct DB connection for better security and to avoid PostgREST limitations
       DB_HOST: "aws-0-ap-southeast-1.pooler.supabase.com" # Find this in your Supabase project settings
+      DB_PORT: 5432 # Add this line
       DB_NAME: "postgres"
       DB_USER: ${{ secrets.DB_USER }}
       DB_PASS: ${{ secrets.DB_PASS }}
@@ -69,6 +70,33 @@ jobs:
           else
             echo "✅ Database credentials found."
           fi
+
+      - name: DEBUG - Verify DB_USER Format
+        id: verify_secret
+        run: |
+          echo "--- Verifying the format of the DB_USER secret ---"
+          USER_VAR="${{ secrets.DB_USER }}"
+          
+          if [[ -z "$USER_VAR" ]]; then
+            echo "::error::CRITICAL: The DB_USER secret is completely empty or not found."
+            exit 1
+          fi
+
+          if [[ "$USER_VAR" != *"."* ]]; then
+            echo "::error::CRITICAL: The DB_USER secret does not contain a period ('.')."
+            echo "It appears to be missing the project_ref."
+            echo "Received value (masked): [${{ secrets.DB_USER }}]"
+            exit 1
+          fi
+
+          USER_PART=$(echo "$USER_VAR" | cut -d'.' -f1)
+          PROJECT_REF_PART=$(echo "$USER_VAR" | cut -d'.' -f2)
+
+          echo "Secret format appears CORRECT."
+          echo "  - Username part found: [$USER_PART]"
+          echo "  - Project Ref part found: [length: ${#PROJECT_REF_PART}]"
+          echo "If the username or length is wrong, the secret value is incorrect."
+          echo "--- Verification complete ---"
 
       - name: Run Data Export Script
         id: export_script
