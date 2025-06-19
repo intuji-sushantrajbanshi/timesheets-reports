@@ -1,110 +1,99 @@
 import os
-import requests
-import pandas as pd
-import json
+import sys
+import traceback
 from datetime import datetime
+import pandas as pd
+import psycopg
 
-# --- Configuration ---
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+def get_db_connection():
+    """Establishes a direct connection to the Supabase PostgreSQL database."""
+    try:
+        conn_string = (
+            f"host='{os.environ['DB_HOST']}' "
+            f"dbname='{os.environ['DB_NAME']}' "
+            f"user='{os.environ['DB_USER']}' "
+            f"password='{os.environ['DB_PASS']}' "
+            "sslmode='require'"
+        )
+        return psycopg.connect(conn_string)
+    except Exception as e:
+        print(f"❌ Critical Error: Could not connect to the database. Details: {e}", file=sys.stderr)
+        sys.exit(1)
 
-# These will be set in the GitHub Actions workflow
-# Example: 'Department of Health (Government of Western Australia),Coerco'
-TARGET_PROJECTS_STR = os.environ.get("TARGET_PROJECTS", "")
-# Example: 'TODAY', 'THIS_WEEK', 'LAST_MONTH'
-DATE_FILTER = os.environ.get("DATE_FILTER", "TODAY") 
-
-# Common headers for RPC calls
-HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Content-Type": "application/json",
-}
-
-def call_project_report_rpc(project_name, date_filter):
-    """Calls the get_project_time_report function in Supabase."""
-    endpoint = f"{SUPABASE_URL}/rest/v1/rpc/get_project_time_report"
-    payload = {
-        "target_project_name_param": project_name,
-        "date_filter_param": date_filter
-    }
+def fetch_project_time_report(conn, projects, date_filter, start_date, end_date):
+    """Calls the get_project_time_report function in the database."""
+    sql_query = """
+        SELECT * FROM public.get_project_time_report(
+            %s, -- target_project_names_param (array)
+            %s, -- date_filter_param
+            %s, -- custom_start_date_param
+            %s  -- custom_end_date_param
+        );
+    """
+    params = (projects, date_filter, start_date, end_date)
     
     try:
-        print(f"🚀 Calling RPC for Project: '{project_name}', Filter: '{date_filter}'")
-        response = requests.post(endpoint, headers=HEADERS, json=payload)
+        print(f"🚀 Executing query for Projects: {projects}, Filter: '{date_filter}'...")
+        # Use a server-side cursor for potentially large datasets
+        with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            df = pd.DataFrame(cur.execute(sql_query, params).fetchall())
         
-        response.raise_for_status() # Raises an HTTPError for bad responses (4xx or 5xx)
-        
-        data = response.json()
-        if not data:
-            print(f"✅ RPC successful, but no data returned for '{project_name}'.")
-            return pd.DataFrame()
-            
-        df = pd.DataFrame(data)
-        print(f"✅ Successfully fetched {len(df)} rows for '{project_name}'.")
+        if df.empty:
+            print("✅ Query successful, but no data returned for the given filters.")
+        else:
+            print(f"✅ Successfully fetched {len(df)} rows.")
         return df
-        
-    except requests.exceptions.HTTPError as http_err:
-        print(f"❌ HTTP Error calling RPC for '{project_name}': {http_err.response.status_code} - {http_err.response.text}")
-        return pd.DataFrame()
+
     except Exception as e:
-        print(f"❌ An unexpected error occurred calling RPC for '{project_name}': {str(e)}")
+        print(f"❌ An error occurred during database query: {e}", file=sys.stderr)
+        traceback.print_exc()
         return pd.DataFrame()
+
+def set_github_action_output(name, value):
+    """Sets an output variable for subsequent GitHub Actions steps."""
+    if "GITHUB_OUTPUT" in os.environ:
+        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+            f.write(f"{name}={value}\n")
 
 def main():
     """Main execution function."""
-    if not TARGET_PROJECTS_STR:
-        print("❌ Environment variable TARGET_PROJECTS is not set. Exiting.")
-        # Create an error file to ensure the workflow step doesn't fail silently
-        os.makedirs("exports", exist_ok=True)
-        with open("exports/error.txt", "w") as f:
-            f.write("TARGET_PROJECTS environment variable was not set.")
-        exit(1)
+    projects_str = os.environ.get("TARGET_PROJECTS")
+    if not projects_str:
+        print("❌ Environment variable TARGET_PROJECTS is not set. Exiting.", file=sys.stderr)
+        sys.exit(1)
         
-    target_projects = [p.strip() for p in TARGET_PROJECTS_STR.split(',')]
-    print(f"🎯 Target projects: {target_projects}")
-    print(f"🗓️ Date filter: {DATE_FILTER}")
-    
-    all_project_dfs = []
-    
-    for project in target_projects:
-        project_df = call_project_report_rpc(project, DATE_FILTER)
-        if not project_df.empty:
-            all_project_dfs.append(project_df)
-    
-    if not all_project_dfs:
-        print("⚠️ No data found for any of the target projects. Creating an empty report.")
-        # Create a placeholder file to indicate no data was found
-        os.makedirs("exports", exist_ok=True)
-        with open("exports/no_data_found.txt", "w") as f:
-            f.write(f"No time entries found for projects {target_projects} with date filter '{DATE_FILTER}' on {datetime.now().isoformat()}")
-        exit(0)
+    target_projects = [p.strip() for p in projects_str.split(',')]
+    date_filter = os.environ.get("DATE_FILTER", "TODAY")
+    custom_start_date = os.environ.get("CUSTOM_START_DATE") or None
+    custom_end_date = os.environ.get("CUSTOM_END_DATE") or None
 
-    # Combine all dataframes into one
-    final_df = pd.concat(all_project_dfs, ignore_index=True)
-    
-    # Sort the final combined data
-    final_df = final_df.sort_values(by=['project_name', 'user_name', 'focus_area'], ascending=[True, True, True])
+    conn = get_db_connection()
+    final_df = fetch_project_time_report(conn, target_projects, date_filter, custom_start_date, custom_end_date)
+    conn.close()
 
-    # --- Save to CSV ---
-    os.makedirs("exports", exist_ok=True)
+    output_dir = "exports"
+    os.makedirs(output_dir, exist_ok=True)
     
     # Generate a dynamic filename
-    safe_date_filter = DATE_FILTER.lower().replace('_', '-')
+    effective_filter = "custom-range" if custom_start_date else date_filter.lower().replace('_', '-')
     timestamp = datetime.now().strftime("%Y-%m-%d")
-    output_filename = f"exports/report_{safe_date_filter}_{timestamp}.csv"
-    
-    final_df.to_csv(output_filename, index=False)
-    
-    print(f"✅ Successfully created report: {output_filename} with {len(final_df)} total rows.")
+    output_filename = f"{output_dir}/report_{effective_filter}_{timestamp}.csv"
+
+    if final_df.empty:
+        print("⚠️ No data found. Creating an empty report file to indicate a successful run with no results.")
+        # Create an empty file with headers to maintain schema consistency
+        headers = [
+            "date_filter_used", "filter_start_date", "filter_end_date", "project_name",
+            "user_name", "focus_area", "description", "total_duration_raw",
+            "total_hours", "total_entries"
+        ]
+        pd.DataFrame(columns=headers).to_csv(output_filename, index=False)
+    else:
+        final_df.to_csv(output_filename, index=False)
+        print(f"✅ Successfully created report: {output_filename} with {len(final_df)} total rows.")
+
+    # Set the path of the created file as an output for the next GitHub step
+    set_github_action_output("csv_filepath", output_filename)
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print(f"❌ A critical error occurred in the main script execution: {str(e)}")
-        import traceback
-        os.makedirs("exports", exist_ok=True)
-        with open("exports/fatal_error.txt", "w") as f:
-            f.write(f"Error: {str(e)}\n\n{traceback.format_exc()}")
-        exit(1)
+    main()
