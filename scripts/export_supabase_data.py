@@ -8,13 +8,21 @@ import psycopg
 def get_db_connection():
     """Establishes a direct connection to the Supabase PostgreSQL database."""
     try:
+        # Use os.environ.get() for safer access and provide a default for the port
+        db_port = os.environ.get("DB_PORT", "5432")
         conn_string = (
             f"host='{os.environ['DB_HOST']}' "
+            f"port='{db_port}' "
             f"dbname='{os.environ['DB_NAME']}' "
             f"user='{os.environ['DB_USER']}' "
             f"password='{os.environ['DB_PASS']}' "
             "sslmode='require'"
         )
+        print("Attempting to connect with:")
+        print(f"  Host: {os.environ['DB_HOST']}")
+        print(f"  Port: {db_port}")
+        print(f"  DB Name: {os.environ['DB_NAME']}")
+        # We will NOT print the user or password for security
         return psycopg.connect(conn_string)
     except Exception as e:
         print(f"❌ Critical Error: Could not connect to the database. Details: {e}", file=sys.stderr)
