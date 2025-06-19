@@ -1,91 +1,95 @@
-name: Export Supabase Data to CSV
+name: Export Supabase Project Data to CSV
 
 on:
   schedule:
-    - cron: '15 11 * * *' # Every day at 5 PM Nepal/Kathmandu Time (UTC+5:45)
+    - cron: '15 7 * * 1-5' # Runs at 1:00 PM NPT (UTC+5:45) every weekday
   workflow_dispatch:
-  push:
-    branches:
-      - master
-      - main
+    inputs:
+      target_projects:
+        description: 'Comma-separated list of project names'
+        required: true
+        default: 'Sell & Parker,Coerco'
+      date_filter:
+        description: 'Predefined date filter'
+        required: true
+        default: 'YESTERDAY'
+        type: choice
+        options:
+        - TODAY
+        - YESTERDAY
+        - THIS_WEEK
+        - LAST_WEEK
+        - THIS_MONTH
+        - LAST_MONTH
+        - TILL_DATE
+      custom_start_date:
+        description: 'Custom Start Date (YYYY-MM-DD) (optional)'
+        required: false
+      custom_end_date:
+        description: 'Custom End Date (YYYY-MM-DD) (optional)'
+        required: false
 
 permissions:
-  contents: write
+  contents: write # Required to commit the CSV file
 
 jobs:
   export-data:
     runs-on: ubuntu-latest
     env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      # Use a service_role key for SECURITY DEFINER functions if needed, 
-      # but anon key should work too. service_role is more robust.
-      SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY || secrets.SUPABASE_KEY }}
-      
+      # Use direct DB connection for better security and to avoid PostgREST limitations
+      DB_HOST: "aws-0-ap-southeast-1.pooler.supabase.com" # Find this in your Supabase project settings
+      DB_NAME: "postgres"
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASS: ${{ secrets.DB_PASS }}
+      # Parameters for the script
+      TARGET_PROJECTS: ${{ github.event.inputs.target_projects || 'Sell & Parker,Coerco,LFA First Response' }}
+      DATE_FILTER: ${{ github.event.inputs.date_filter || 'YESTERDAY' }}
+      CUSTOM_START_DATE: ${{ github.event.inputs.custom_start_date }}
+      CUSTOM_END_DATE: ${{ github.event.inputs.custom_end_date }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas
+          pip install pandas "psycopg[binary]" # Use psycopg for direct DB connection
 
-      - name: Check Supabase credentials
+      - name: Verify Credentials
         run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
-            echo "❌ Supabase credentials are not properly set in GitHub secrets."
+          if [ -z "${DB_USER}" ] || [ -z "${DB_PASS}" ]; then
+            echo "❌ Database credentials (DB_USER, DB_PASS) are not set in GitHub Secrets."
             exit 1
           else
-            echo "✅ Supabase credentials found"
+            echo "✅ Database credentials found."
           fi
 
-      - name: Export project time data from Supabase
-        run: |
-          mkdir -p exports
-          python scripts/export_supabase_data.py
-        env:
-          # NEW: Define the projects and date filter here
-          TARGET_PROJECTS: "Department of Health (Government of Western Australia),Coerco,LFA First Response"
-          DATE_FILTER: "TODAY" # Options: TODAY, THIS_WEEK, LAST_WEEK, THIS_MONTH, LAST_MONTH, TILL_DATE
+      - name: Run Data Export Script
+        id: export_script
+        run: python scripts/export_supabase_data.py
 
-      # ... (check for exported files, upload artifacts, commit steps are fine) ...
-      # ... I've left the rest of your workflow as is, as it's functionally correct for saving the artifacts/results.
-      - name: Check for exported files
-        run: |
-          echo "📁 Contents of exports directory:"
-          ls -la exports/ || echo "No exports directory found"
-          
-          if [ -d "exports" ] && [ "$(ls -A exports)" ]; then
-            echo "✅ Export files found"
-          else
-            echo "⚠️ No export files found, check logs for details."
-            # The python script now creates its own informative empty file.
-          fi
-
-      - name: Upload artifacts
+      - name: Upload CSV as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: supabase-project-time-export
-          path: exports/
+          name: project-time-export
+          path: ${{ steps.export_script.outputs.csv_filepath }}
           retention-days: 30
 
-      - name: Commit and push changes
+      - name: Commit and Push CSV
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add exports/
-          # Commit only if there are changes to the exports directory
+          git add ${{ steps.export_script.outputs.csv_filepath }}
+          # Commit only if there are changes
           if ! git diff --staged --quiet; then
-            git commit -m "feat: Daily project time export for $(date -u +'%Y-%m-%d')"
+            git commit -m "feat(data): Daily project time export for ${{ env.DATE_FILTER }} on $(date -u +'%Y-%m-%d')"
             git push
           else
-            echo "No changes to commit."
+            echo "No changes to data, skipping commit."
           fi
-        env:
-          # Ensure you have a GITHUB_TOKEN or a specific PAT with write permissions
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
